@@ -1,2 +1,5 @@
 # Personal configuration file
 github-pr-board.yaml
+
+# Database
+github-pr-board.db

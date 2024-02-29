@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <title>GitHub PR board</title>
+    <link rel="icon" href="data:,">
     <style type="text/css">
         body {
             font-family: 'Open Sans', Arial, sans-serif;
@@ -13,7 +15,7 @@
         }
 
         td, th {
-            padding: 0.25rem 1rem 0.25rem 0;
+            padding: 0.25rem 0.75rem;
         }
 
         th {
@@ -34,26 +36,55 @@
         }
 
         .repo-name {
-            font-family: monospace;
+            font-family: 'DejaVu Sans Mono', monospace;
+        }
+
+        td.status-snoozed {
+            background-color: #bbb;
+        }
+
+        td.status-unknown {
+            background-color: #cfc; /* PR not known yet */
         }
     </style>
+    <script type="text/javascript">
+        function snooze(pullRequestUrl) {
+            alert(pullRequestUrl);
+        }
+    </script>
 </head>
 <body>
 <table>
     <thead>
         <tr>
             <th>Repo</th>
+            <th>Status</th>
             <th>PR link</th>
+            <th>Action</th>
         </tr>
     </thead>
     <tbody>
         {% for pr in my_pull_requests|sort(attribute='url') %}
             <tr>
                 <td>
-                    <span class="repo-name">{{pr.repository.nameWithOwner }}</span>
+                    <span class="repo-name">{{ pr.repository.nameWithOwner }}</span>
+                </td>
+                <td class="status-{{ pr.db.status }}">
+                    {{ pr.db.status }}
                 </td>
                 <td>
                     <a href="{{ pr.url }}" class="pr-link">{{ pr.title }}</a>
+                </td>
+                <td>
+                    <form action="/pr/snooze" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <input type="hidden" name="pr_url" value="{{ pr.url }}" />
+                        <input type="hidden" name="current_updated_at" value="{{ pr.updatedAt }}" />
+
+                        <button type="submit">
+                            Snooze until update
+                        </button>
+                    </form>
                 </td>
             </tr>
         {% endfor %}
