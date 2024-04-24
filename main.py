@@ -443,7 +443,7 @@ def main():
             'starting this application. Not the first time? The directory cannot be found and this is a hard error.')
 
     with open('main.html.j2') as f:
-        ServerHandler.website_template = jinja2.Template(f.read())
+        ServerHandler.website_template = jinja2.Template(f.read(), autoescape=True)
 
     # The diskcache module uses a directory for the cache
     ServerHandler.cache = diskcache.Cache(os.path.abspath('workboard.cache'))
