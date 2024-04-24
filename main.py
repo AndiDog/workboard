@@ -320,6 +320,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             data = {
                 'csrf_token': csrf_token,
                 'github_user': self.github_user,
+                'last_clicked_github_pr_url': self.db.get('last-clicked-github-pr-url'),
                 'pull_requests': pull_requests_to_render,
             }
             res = self.website_template.render(data, undefined=jinja2.StrictUndefined).encode('utf-8')
@@ -370,6 +371,9 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 for cache_key in cache_keys_to_delete:
                     logging.debug('Uncaching value for key %r for PR %r', cache_key, pr_url)
                     del self.cache[cache_key]
+
+            with self.db.transact():
+                self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
 
             self.send_response(204)
             self.end_headers()
