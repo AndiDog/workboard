@@ -452,6 +452,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 pr['workboard_fields']['last_change'] = time.time()
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
+                self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
 
             # Back to homepage (full reload - yes this is a very simple web app!)
             self.send_response(303)
@@ -473,6 +474,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 pr['workboard_fields']['last_change'] = time.time()
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
+                self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
 
             # Back to homepage (full reload - yes this is a very simple web app!)
             self.send_response(303)
@@ -495,6 +497,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 pr['workboard_fields']['snooze_until'] = time.time() + 86400
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
+                self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
 
             # Back to homepage (full reload - yes this is a very simple web app!)
             self.send_response(303)
@@ -526,6 +529,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 pr['workboard_fields']['snooze_until_updated_at_changed_from'] = snooze_until_updated_at_changed_from
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
+                self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
 
             # Back to homepage (full reload - yes this is a very simple web app!)
             self.send_response(303)
