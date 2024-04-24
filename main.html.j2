@@ -39,8 +39,23 @@
             font-family: 'DejaVu Sans Mono', monospace;
         }
 
-        td.status-snoozed {
-            background-color: #bbb;
+        td.status-merged {
+            background-color: #fcc;
+        }
+
+        td.status-must-review {
+            font-weight: bold;
+            background-color: #fcc;
+        }
+
+        td.status-snoozed-until-time {
+            background-color: #ddd;
+            color: #999;
+        }
+
+        td.status-snoozed-until-update {
+            background-color: #ddd;
+            color: #999;
         }
 
         td.status-unknown {
@@ -84,8 +99,17 @@
                     {{ pr.render_only_fields.last_updated_desc }}
                 </td>
                 <td>
-                    {% if pr.workboard_fields.status != "snoozed" %}
-                        <form action="/pr/snooze" method="POST">
+                    {% if pr.workboard_fields.status != 'snoozed-until-time' and pr.workboard_fields.status != 'snoozed-until-update' %}
+                        <form action="/pr/snooze-until-time" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                            <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
+
+                            <button type="submit">
+                                Snooze for 1 day
+                            </button>
+                        </form>
+
+                        <form action="/pr/snooze-until-update" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                             <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
                             <input type="hidden" name="current_updated_at" value="{{ pr.github_fields.updatedAt }}" />

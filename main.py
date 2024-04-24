@@ -28,7 +28,9 @@ PORT = 16666
 
 class PullRequestStatus:
     MERGED = 'merged'
-    SNOOZED = 'snoozed'
+    MUST_REVIEW = 'must-review'
+    SNOOZED_UNTIL_TIME = 'snoozed-until-time'
+    SNOOZED_UNTIL_UPDATE = 'snoozed-until-update'
     UPDATED_AFTER_SNOOZE = 'updated-after-snooze'
     UNKNOWN = 'unknown'
 
@@ -68,9 +70,10 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         with self.db.transact():
             value = self.db.get(cache_key)
             if value is not None:
-                logging.debug('Using cached value for key %r instead of running process', cache_key)
+                logging.info('Using cached value for command output of cache key %r', cache_key)
                 return value
 
+            logging.info('Running command for cache key %r', cache_key)
             proc = subprocess.Popen(*args, **kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (stdout, stderr) = proc.communicate()
             if proc.returncode:
@@ -88,7 +91,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         """
         extra_fields = self._cached_subprocess_check_output(
             f'subprocess.pr.{github_pr["url"]}.v1',
-            600,
+            600,  # TODO: Cache for longer if last update of PR is very long ago (months/years)
             lambda v: json.loads(v),
 
             [
@@ -131,11 +134,26 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         # If any new fields are required here, add them to our `gh search prs [...] --json` command or it won't
         # be fetched.
 
+        # Migrations from renames/refactoring
+        if (pr['workboard_fields']['status'] == 'snoozed'
+                and pr['workboard_fields'].get('snooze_until_updated_at_changed_from')):
+            logging.info('Migrating `snoozed` status value for PR %r', github_pr['url'])
+            pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_UPDATE
+
         if pr['workboard_fields']['status'] != PullRequestStatus.MERGED and github_pr['mergedAt']:
             pr['workboard_fields']['status'] = PullRequestStatus.MERGED
             pr['workboard_fields']['last_change'] = time.time()
 
-        if pr['workboard_fields']['status'] == PullRequestStatus.SNOOZED and github_pr.get('updatedAt') and github_pr['updatedAt'] != pr['workboard_fields']['snooze_until_updated_at_changed_from']:
+        if (pr['workboard_fields']['status'] == PullRequestStatus.SNOOZED_UNTIL_TIME
+                and pr['workboard_fields']['snooze_until'] <= time.time()):
+            logging.info('Passed the time until PR %r was snoozed, unsnoozing it', github_pr['url'])
+            pr['workboard_fields']['status'] = PullRequestStatus.MUST_REVIEW
+            pr['workboard_fields']['last_change'] = time.time()
+            del pr['workboard_fields']['snooze_until']
+
+        if (pr['workboard_fields']['status'] == PullRequestStatus.SNOOZED_UNTIL_UPDATE
+                and github_pr.get('updatedAt')
+                and github_pr['updatedAt'] != pr['workboard_fields']['snooze_until_updated_at_changed_from']):
             logging.info(
                 'Snoozed PR %r was updated between %r and %r, unsnoozing it',
                 github_pr['url'], pr['workboard_fields']['snooze_until_updated_at_changed_from'], github_pr['updatedAt'])
@@ -162,8 +180,11 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             raise RuntimeError(f'This app has only URL path `/` (not {self.path!r})')
 
         try:
+            already_updated_github_pr_urls = set()
+
+            # Own PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.{self.github_user}.v1',
+                f'subprocess.prs.own.{self.github_user}.v1',
                 600,
                 lambda v: json.loads(v),
 
@@ -177,13 +198,68 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 ],
                 encoding='utf-8',
             ):
+                if github_pr['url'] in already_updated_github_pr_urls:
+                    continue
                 github_pr = self._fetch_remaining_github_pr_fields(github_pr)
                 self._update_db_from_github_pr(github_pr)
+                already_updated_github_pr_urls.add(github_pr['url'])
 
-            pull_requests = sorted(
-                map(self._add_render_only_fields, self.db.get('pull_requests', {}).values()),
+            # Assigned PRs
+            for github_pr in self._cached_subprocess_check_output(
+                f'subprocess.prs.assigned.{self.github_user}.v1',
+                600,
+                lambda v: json.loads(v),
+
+                [
+                    'gh',
+                    'search', 'prs',
+                    '--assignee', self.github_user,
+                    '--state', 'open',
+                    # When adding fields here, ensure bumping the cache key above
+                    '--json', 'repository,updatedAt,url,title'
+                ],
+                encoding='utf-8',
+            ):
+                if github_pr['url'] in already_updated_github_pr_urls:
+                    continue
+                github_pr = self._fetch_remaining_github_pr_fields(github_pr)
+                self._update_db_from_github_pr(github_pr)
+                already_updated_github_pr_urls.add(github_pr['url'])
+
+            # Review requested PRs
+            for github_pr in self._cached_subprocess_check_output(
+                f'subprocess.prs.review-requested.{self.github_user}.v1',
+                600,
+                lambda v: json.loads(v),
+
+                [
+                    'gh',
+                    'search', 'prs',
+                    '--review-requested', self.github_user,
+                    '--state', 'open',
+                    # When adding fields here, ensure bumping the cache key above
+                    '--json', 'repository,updatedAt,url,title'
+                ],
+                encoding='utf-8',
+            ):
+                if github_pr['url'] in already_updated_github_pr_urls:
+                    continue
+                github_pr = self._fetch_remaining_github_pr_fields(github_pr)
+                self._update_db_from_github_pr(github_pr)
+                already_updated_github_pr_urls.add(github_pr['url'])
+
+            pull_requests_from_db = self.db.get('pull_requests', {})
+            missing_github_pr_urls = set(pull_requests_from_db.keys()) - already_updated_github_pr_urls
+            assert not missing_github_pr_urls, f'TODO: Implement fetching updates for merged/closed PRs. Remaining: {missing_github_pr_urls}'
+
+            pull_requests_to_render = sorted(
+                map(self._add_render_only_fields, pull_requests_from_db.values()),
                 # PRs with latest changes are displayed on top, unless they're snoozed
-                key=lambda pr: (pr['workboard_fields']['status'] == PullRequestStatus.SNOOZED, -pr['workboard_fields'].get('last_change', 2**63)),
+                key=lambda pr: (
+                    pr['workboard_fields']['status'] in (
+                        PullRequestStatus.SNOOZED_UNTIL_TIME, PullRequestStatus.SNOOZED_UNTIL_UPDATE),
+                    -pr['workboard_fields'].get('last_change', 2**63),
+                ),
             )
 
             csrf_token = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(100))
@@ -193,7 +269,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             data = {
                 'csrf_token': csrf_token,
                 'github_user': self.github_user,
-                'pull_requests': pull_requests,
+                'pull_requests': pull_requests_to_render,
             }
             res = self.website_template.render(data, undefined=jinja2.StrictUndefined).encode('utf-8')
 
@@ -222,7 +298,30 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         return params
 
     def do_POST(self):
-        if self.path == '/pr/snooze':
+        if self.path == '/pr/snooze-until-time':
+            params = self._get_protected_post_params()
+
+            pr_url = params['pr_url']
+            if not isinstance(pr_url, str) or len(pr_url) > 300:
+                raise ValueError('Invalid pr_url')
+
+            logging.info(
+                'Snoozing PR %r for 1 day', pr_url)
+
+            with self.db.transact():
+                pull_requests = self.db['pull_requests']
+                pr = pull_requests[pr_url]
+                pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_TIME
+                pr['workboard_fields']['last_change'] = time.time()
+                pr['workboard_fields']['snooze_until'] = time.time() + 86400
+                self._validate_pull_requests(pull_requests)
+                self.db.set('pull_requests', pull_requests)
+
+            # Back to homepage (full reload - yes this is a very simple web app!)
+            self.send_response(303)
+            self.send_header('Location', '/')
+            self.end_headers()
+        elif self.path == '/pr/snooze-until-update':
             params = self._get_protected_post_params()
 
             pr_url = params['pr_url']
@@ -235,17 +334,17 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     or len(snooze_until_updated_at_changed_from) > 30):
                 raise ValueError('Invalid current_updated_at')
 
+            logging.info(
+                'Snoozing PR %r until updatedAt changed away from %r', pr_url, snooze_until_updated_at_changed_from)
+
             with self.db.transact():
                 pull_requests = self.db['pull_requests']
                 pr = pull_requests[pr_url]
-                pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED
+                pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_UPDATE
                 pr['workboard_fields']['last_change'] = time.time()
                 pr['workboard_fields']['snooze_until_updated_at_changed_from'] = snooze_until_updated_at_changed_from
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
-
-            logging.info(
-                'Snoozing PR %r until updatedAt changed away from %r', pr_url, snooze_until_updated_at_changed_from)
 
             # Back to homepage (full reload - yes this is a very simple web app!)
             self.send_response(303)
