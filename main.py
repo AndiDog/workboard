@@ -361,8 +361,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(f'''
                 <html><body>
                 <h1 style="color: red">Error</h1>
-                <pre>
-                {html.escape(traceback.format_exc())}
+                <pre>{html.escape(traceback.format_exc())}
                 </pre>
                 </body></html>
             '''.encode('utf-8'))
