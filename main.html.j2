@@ -69,10 +69,15 @@
         td.status-updated-after-snooze {
             background-color: #cfc;
         }
+
+        .action-delete {
+            font-weight: bold;
+            color: #f20;
+        }
     </style>
     <script type="text/javascript">
-        function snooze(pullRequestUrl) {
-            alert(pullRequestUrl);
+        function confirmDeletion() {
+            return window.confirm('Really forget about this PR? It will only be re-added automatically if it is reopened and authored/assigned/review-requested by you.');
         }
     </script>
 </head>
@@ -131,6 +136,17 @@
 
                             <button type="submit">
                                 Mark 'must review'
+                            </button>
+                        </form>
+                    {% endif %}
+
+                    {% if pr.workboard_fields.status == 'merged' %}
+                        <form action="/pr/delete" method="POST" onsubmit="return confirmDeletion()">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                            <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
+
+                            <button type="submit" class="action-delete">
+                                Delete
                             </button>
                         </form>
                     {% endif %}

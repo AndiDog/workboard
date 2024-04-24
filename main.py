@@ -316,7 +316,27 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         return params
 
     def do_POST(self):
-        if self.path == '/pr/mark-must-review':
+        if self.path == '/pr/delete':
+            params = self._get_protected_post_params()
+
+            pr_url = params['pr_url']
+            if not isinstance(pr_url, str) or len(pr_url) > 300:
+                raise ValueError('Invalid pr_url')
+
+            logging.info(
+                'Deleting PR %r', pr_url)
+
+            with self.db.transact():
+                pull_requests = self.db['pull_requests']
+                del pull_requests[pr_url]
+                self._validate_pull_requests(pull_requests)
+                self.db.set('pull_requests', pull_requests)
+
+            # Back to homepage (full reload - yes this is a very simple web app!)
+            self.send_response(303)
+            self.send_header('Location', '/')
+            self.end_headers()
+        elif self.path == '/pr/mark-must-review':
             params = self._get_protected_post_params()
 
             pr_url = params['pr_url']
