@@ -75,13 +75,16 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def _cached_subprocess_check_output(self, *, cache_key, cache_duration_seconds, read_from_cache=True, mutate_before_store_in_cache=None, subprocess_kwargs):
         with self.cache.transact():
-            value = self.cache.get(cache_key) if read_from_cache else None
-            if value is not None:
-                logging.debug(
-                    'Using cached value for command output of cache key %r (cache duration: %s)',
-                    cache_key,
-                    cache_duration_seconds)
-                return value
+            if read_from_cache:
+                value = self.cache.get(cache_key)
+                if value is not None:
+                    logging.debug(
+                        'Using cached value for command output of cache key %r (cache duration: %s)',
+                        cache_key,
+                        cache_duration_seconds)
+                    return value
+            else:
+                logging.debug('Avoiding read from cache for cache key %r', cache_key)
 
             logging.debug('Running command for cache key %r (cache duration: %ds)', cache_key, cache_duration_seconds)
             proc = subprocess.Popen(**subprocess_kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -121,7 +124,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             cache_key=f'subprocess.pr.{github_pr["url"]}.{extra_fields_json_arg}',
             cache_duration_seconds=cache_duration_seconds,
             mutate_before_store_in_cache=lambda v: json.loads(v),
-            read_from_cache=read_from_cache,
+            read_from_cache=read_from_cache and not self.db.get(f'avoid-cache.{github_pr["url"]}'),
             subprocess_kwargs=dict(
                 args=[
                     'gh',
@@ -383,7 +386,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(pr_url, str) or len(pr_url) > 300:
                 raise ValueError('Invalid pr_url')
 
-            logging.info('Uncaching PR %r so the next page reload will fetch the latest updates', pr_url)
+            logging.info('Uncaching PR %r so the next few page reloads will fetch the latest updates each time', pr_url)
 
             with self.cache.transact():
                 # Brute-force substring search, potentially matching unrelated cache keys, is good enough for the small
@@ -398,6 +401,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             with self.db.transact():
                 self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
+                self.db.set(f'avoid-cache.{pr_url}', True, expire=300)
 
             self.send_response(204)
             self.end_headers()
@@ -505,15 +509,16 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             # comment or the like. Therefore, we need to update our stale `updatedAt` field in the database and only
             # want to return from snooze once another update happened after the user clicked the snooze button.
             # Format `2023-12-01T10:45:55Z`
-            pr = self._refetch_and_store_github_pr(pr_url)
-            snooze_until_updated_at_changed_from = pr['github_fields']['updatedAt']
-
-            logging.info(
-                'Snoozing PR %r until updatedAt changed away from %r', pr_url, snooze_until_updated_at_changed_from)
+            self._refetch_and_store_github_pr(pr_url)
 
             with self.db.transact():
                 pull_requests = self.db['pull_requests']
                 pr = pull_requests[pr_url]
+
+                snooze_until_updated_at_changed_from = pr['github_fields']['updatedAt']
+                logging.info(
+                    'Snoozing PR %r until updatedAt changed away from %r', pr_url, snooze_until_updated_at_changed_from)
+
                 pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_UPDATE
                 pr['workboard_fields']['last_change'] = time.time()
                 pr['workboard_fields']['snooze_until_updated_at_changed_from'] = snooze_until_updated_at_changed_from

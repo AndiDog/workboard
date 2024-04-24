@@ -136,7 +136,10 @@
             var form = document.getElementById('uncache-' + githubPrUrl);
             form.submit();
 
-            // Reload the page so the last-clicked PR is highlighted when the user returns to this browser tab
+            // Reload the page so the last-clicked PR is highlighted when the user returns to this browser tab.
+            // On the server, this sets an "avoid cache" flag for some seconds. That setting should be stored
+            // *before* this reload happens, or else the reload's GitHub PR fetch command output will be cached
+            // again for a while, leading to usage of old data once the user returns after making changes to that PR.
             setTimeout(function() {
                 reload(null);
             }, 2000);
