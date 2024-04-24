@@ -29,6 +29,10 @@ PORT = 16666
 class PullRequestStatus:
     MERGED = 'merged'
     MUST_REVIEW = 'must-review'
+
+    # Basically means that someone else takes care of the review. Only makes sense for PRs authored by others.
+    SNOOZED_UNTIL_MENTIONED = 'snoozed-until-mentioned'
+
     SNOOZED_UNTIL_TIME = 'snoozed-until-time'
     SNOOZED_UNTIL_UPDATE = 'snoozed-until-update'
     UPDATED_AFTER_SNOOZE = 'updated-after-snooze'
@@ -60,6 +64,10 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
     def _add_render_only_fields(self, pr):
         pr = copy.deepcopy(pr)
         pr['render_only_fields'] = {
+            'author_is_self': (
+                pr['github_fields']['author']['type'] == 'User'
+                and pr['github_fields']['author']['login'] == self.github_user
+            ),
             'last_updated_desc': timeago.format(
                 datetime.datetime.fromtimestamp(github_datetime_to_timestamp(pr['github_fields']['updatedAt'])),
                 locale='en'),
@@ -184,7 +192,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Own PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.own.{self.github_user}.v1',
+                f'subprocess.prs.own.{self.github_user}.v3',
                 600,
                 lambda v: json.loads(v),
 
@@ -194,7 +202,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     '--author', self.github_user,
                     '--state', 'open',
                     # When adding fields here, ensure bumping the cache key above
-                    '--json', 'repository,updatedAt,url,title'
+                    '--json', 'author,repository,updatedAt,url,title'
                 ],
                 encoding='utf-8',
             ):
@@ -206,7 +214,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Assigned PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.assigned.{self.github_user}.v1',
+                f'subprocess.prs.assigned.{self.github_user}.v3',
                 600,
                 lambda v: json.loads(v),
 
@@ -216,7 +224,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     '--assignee', self.github_user,
                     '--state', 'open',
                     # When adding fields here, ensure bumping the cache key above
-                    '--json', 'repository,updatedAt,url,title'
+                    '--json', 'author,repository,updatedAt,url,title'
                 ],
                 encoding='utf-8',
             ):
@@ -228,7 +236,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Review requested PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.review-requested.{self.github_user}.v1',
+                f'subprocess.prs.review-requested.{self.github_user}.v3',
                 600,
                 lambda v: json.loads(v),
 
@@ -238,7 +246,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     '--review-requested', self.github_user,
                     '--state', 'open',
                     # When adding fields here, ensure bumping the cache key above
-                    '--json', 'repository,updatedAt,url,title'
+                    '--json', 'author,repository,updatedAt,url,title'
                 ],
                 encoding='utf-8',
             ):
@@ -313,6 +321,28 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 pull_requests = self.db['pull_requests']
                 pr = pull_requests[pr_url]
                 pr['workboard_fields']['status'] = PullRequestStatus.MUST_REVIEW
+                pr['workboard_fields']['last_change'] = time.time()
+                self._validate_pull_requests(pull_requests)
+                self.db.set('pull_requests', pull_requests)
+
+            # Back to homepage (full reload - yes this is a very simple web app!)
+            self.send_response(303)
+            self.send_header('Location', '/')
+            self.end_headers()
+        elif self.path == '/pr/snooze-until-mentioned':
+            params = self._get_protected_post_params()
+
+            pr_url = params['pr_url']
+            if not isinstance(pr_url, str) or len(pr_url) > 300:
+                raise ValueError('Invalid pr_url')
+
+            logging.info(
+                'Snoozing PR %r until user is mentioned', pr_url)
+
+            with self.db.transact():
+                pull_requests = self.db['pull_requests']
+                pr = pull_requests[pr_url]
+                pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_MENTIONED
                 pr['workboard_fields']['last_change'] = time.time()
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)

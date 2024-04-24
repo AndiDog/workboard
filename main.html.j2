@@ -134,6 +134,17 @@
                             </button>
                         </form>
                     {% endif %}
+
+                    {% if not pr.render_only_fields.author_is_self %}
+                        <form action="/pr/snooze-until-mentioned" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                            <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
+
+                            <button type="submit">
+                                Snooze until I'm mentioned (= someone else reviews)
+                            </button>
+                        </form>
+                    {% endif %}
                 </td>
             </tr>
         {% endfor %}
