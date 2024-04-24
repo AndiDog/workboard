@@ -73,9 +73,9 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         }
         return pr
 
-    def _cached_subprocess_check_output(self, *, cache_key, cache_duration_seconds, read_from_cache=True, mutate_before_store_in_cache=None, subprocess_kwargs):
+    def _cached_subprocess_check_output(self, *, cache_key, cache_duration_seconds, use_cache=True, mutate_before_store_in_cache=None, subprocess_kwargs):
         with self.cache.transact():
-            if read_from_cache:
+            if use_cache:
                 value = self.cache.get(cache_key)
                 if value is not None:
                     logging.debug(
@@ -85,6 +85,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     return value
             else:
                 logging.debug('Avoiding read from cache for cache key %r', cache_key)
+                self.cache.pop(cache_key)
 
             logging.debug('Running command for cache key %r (cache duration: %ds)', cache_key, cache_duration_seconds)
             proc = subprocess.Popen(**subprocess_kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -94,11 +95,12 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             value = stdout
             if mutate_before_store_in_cache is not None:
                 value = mutate_before_store_in_cache(value)
-            self.cache.set(cache_key, value, expire=cache_duration_seconds)
+            if use_cache:
+                self.cache.set(cache_key, value, expire=cache_duration_seconds)
 
         return value
 
-    def _fetch_remaining_github_pr_fields(self, github_pr, read_from_cache=True):
+    def _fetch_remaining_github_pr_fields(self, github_pr, use_cache=True):
         """
         Since the search API doesn't support all fields, such as `merged`, we fetch those separately.
 
@@ -124,7 +126,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             cache_key=f'subprocess.pr.{github_pr["url"]}.{extra_fields_json_arg}',
             cache_duration_seconds=cache_duration_seconds,
             mutate_before_store_in_cache=lambda v: json.loads(v),
-            read_from_cache=read_from_cache and not self.db.get(f'avoid-cache.{github_pr["url"]}'),
+            use_cache=use_cache and not self.db.get(f'avoid-cache.{github_pr["url"]}'),
             subprocess_kwargs=dict(
                 args=[
                     'gh',
@@ -149,7 +151,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         """
         with self.db.transact():
             github_pr = self.db['pull_requests'][pr_url]['github_fields']
-            github_pr = self._fetch_remaining_github_pr_fields(github_pr, read_from_cache=False)
+            github_pr = self._fetch_remaining_github_pr_fields(github_pr, use_cache=False)
             self._update_db_from_github_pr(github_pr)
 
     def _update_db_from_github_pr(self, github_pr):
@@ -397,7 +399,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                         cache_keys_to_delete.append(cache_key)
                 for cache_key in cache_keys_to_delete:
                     logging.debug('Uncaching value for key %r for PR %r', cache_key, pr_url)
-                    del self.cache[cache_key]
+                    self.cache.pop(cache_key)
 
             with self.db.transact():
                 self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
