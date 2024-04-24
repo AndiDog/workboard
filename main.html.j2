@@ -151,7 +151,7 @@
                 </td>
                 <td>
                     {# Submitted when a PR link is clicked (see below call to JavaScript function) #}
-                    <form action="/pr/uncache" method="POST" id="uncache-{{ pr.github_fields.url }}">
+                    <form action="/pr/clicked" method="POST" id="uncache-{{ pr.github_fields.url }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
                     </form>

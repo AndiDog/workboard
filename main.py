@@ -351,7 +351,30 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         return params
 
     def do_POST(self):
-        if self.path == '/pr/delete':
+        if self.path == '/pr/clicked':
+            params = self._get_protected_post_params()
+
+            pr_url = params['pr_url']
+            if not isinstance(pr_url, str) or len(pr_url) > 300:
+                raise ValueError('Invalid pr_url')
+
+            logging.info('Uncaching PR %r so the next page reload will fetch the latest updates', pr_url)
+
+            with self.cache.transact():
+                # Brute-force substring search, potentially matching unrelated cache keys, is good enough for the small
+                # set of data that we expect in the cache storage
+                cache_keys_to_delete = []
+                for cache_key in self.cache:
+                    if pr_url in cache_key:
+                        cache_keys_to_delete.append(cache_key)
+                for cache_key in cache_keys_to_delete:
+                    logging.debug('Uncaching value for key %r for PR %r', cache_key, pr_url)
+                    del self.cache[cache_key]
+
+            self.send_response(204)
+            self.end_headers()
+
+        elif self.path == '/pr/delete':
             params = self._get_protected_post_params()
 
             pr_url = params['pr_url']
@@ -378,28 +401,6 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             # Back to homepage (full reload - yes this is a very simple web app!)
             self.send_response(303)
             self.send_header('Location', '/')
-            self.end_headers()
-        elif self.path == '/pr/uncache':
-            params = self._get_protected_post_params()
-
-            pr_url = params['pr_url']
-            if not isinstance(pr_url, str) or len(pr_url) > 300:
-                raise ValueError('Invalid pr_url')
-
-            logging.info('Uncaching PR %r so the next page reload will fetch the latest updates', pr_url)
-
-            with self.cache.transact():
-                # Brute-force substring search, potentially matching unrelated cache keys, is good enough for the small
-                # set of data that we expect in the cache storage
-                cache_keys_to_delete = []
-                for cache_key in self.cache:
-                    if pr_url in cache_key:
-                        cache_keys_to_delete.append(cache_key)
-                for cache_key in cache_keys_to_delete:
-                    logging.debug('Uncaching value for key %r for PR %r', cache_key, pr_url)
-                    del self.cache[cache_key]
-
-            self.send_response(204)
             self.end_headers()
         elif self.path == '/pr/mark-must-review':
             params = self._get_protected_post_params()
