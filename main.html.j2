@@ -119,6 +119,11 @@
                 location.reload();
             }, 10);
         }
+
+        function uncache(githubPrUrl) {
+            var form = document.getElementById('uncache-' + githubPrUrl);
+            form.submit();
+        }
     </script>
 </head>
 <body>
@@ -145,7 +150,13 @@
                     {{ pr.workboard_fields.status }}
                 </td>
                 <td>
-                    <a href="{{ pr.github_fields.url }}" class="pr-link" target="_blank" rel="noopener">{{ pr.github_fields.title }}</a>
+                    {# Submitted when a PR link is clicked (see below call to JavaScript function) #}
+                    <form action="/pr/uncache" method="POST" id="uncache-{{ pr.github_fields.url }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
+                    </form>
+
+                    <a href="{{ pr.github_fields.url }}" class="pr-link" target="_blank" rel="noopener" onclick="uncache({{ pr.github_fields.url|tojson|forceescape }})">{{ pr.github_fields.title }}</a>
                 </td>
                 <td>
                     {{ pr.render_only_fields.last_updated_desc }}
