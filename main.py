@@ -286,11 +286,17 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             pull_requests_to_render = sorted(
                 map(self._add_render_only_fields, pull_requests_from_db.values()),
-                # PRs with latest changes are displayed on top, unless they're snoozed. Must-review PRs come first.
+                # PRs with latest changes are displayed on top, ordered by status.
                 key=lambda pr: (
-                    pr['workboard_fields']['status'] != PullRequestStatus.MUST_REVIEW,
-                    pr['workboard_fields']['status'] in (
-                        PullRequestStatus.SNOOZED_UNTIL_TIME, PullRequestStatus.SNOOZED_UNTIL_UPDATE),
+                    {
+                        PullRequestStatus.MERGED: 1,
+                        PullRequestStatus.MUST_REVIEW: 2,
+                        PullRequestStatus.SNOOZED_UNTIL_MENTIONED: 5,
+                        PullRequestStatus.SNOOZED_UNTIL_TIME: 5,
+                        PullRequestStatus.SNOOZED_UNTIL_UPDATE: 5,
+                        PullRequestStatus.UPDATED_AFTER_SNOOZE: 3,
+                        PullRequestStatus.UNKNOWN: 4,
+                    }[pr['workboard_fields']['status']],
                     -pr['workboard_fields'].get('last_change', 2**63),
                 ),
             )
