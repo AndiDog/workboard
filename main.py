@@ -410,7 +410,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.environ.get('LOGLEVEL', 'INFO').upper(),
         format='%(asctime)s %(levelname)-8s %(message)s',
     )
 
