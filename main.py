@@ -254,8 +254,9 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             pull_requests_to_render = sorted(
                 map(self._add_render_only_fields, pull_requests_from_db.values()),
-                # PRs with latest changes are displayed on top, unless they're snoozed
+                # PRs with latest changes are displayed on top, unless they're snoozed. Must-review PRs come first.
                 key=lambda pr: (
+                    pr['workboard_fields']['status'] != PullRequestStatus.MUST_REVIEW,
                     pr['workboard_fields']['status'] in (
                         PullRequestStatus.SNOOZED_UNTIL_TIME, PullRequestStatus.SNOOZED_UNTIL_UPDATE),
                     -pr['workboard_fields'].get('last_change', 2**63),
@@ -298,7 +299,29 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         return params
 
     def do_POST(self):
-        if self.path == '/pr/snooze-until-time':
+        if self.path == '/pr/mark-must-review':
+            params = self._get_protected_post_params()
+
+            pr_url = params['pr_url']
+            if not isinstance(pr_url, str) or len(pr_url) > 300:
+                raise ValueError('Invalid pr_url')
+
+            logging.info(
+                'Marking PR %r as must-review', pr_url)
+
+            with self.db.transact():
+                pull_requests = self.db['pull_requests']
+                pr = pull_requests[pr_url]
+                pr['workboard_fields']['status'] = PullRequestStatus.MUST_REVIEW
+                pr['workboard_fields']['last_change'] = time.time()
+                self._validate_pull_requests(pull_requests)
+                self.db.set('pull_requests', pull_requests)
+
+            # Back to homepage (full reload - yes this is a very simple web app!)
+            self.send_response(303)
+            self.send_header('Location', '/')
+            self.end_headers()
+        elif self.path == '/pr/snooze-until-time':
             params = self._get_protected_post_params()
 
             pr_url = params['pr_url']
