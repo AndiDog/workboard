@@ -30,6 +30,7 @@ class PullRequestStatus:
     # Wnen adding new status values here, ensure amending all code that tries to handle every value (CSS classes,
     # sorting of the rendered list, ...)
 
+    CLOSED = 'closed'
     DELETED = 'deleted'
     MERGED = 'merged'
     MUST_REVIEW = 'must-review'
@@ -115,8 +116,9 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         else:
             cache_duration_seconds = 600
 
+        extra_fields_json_arg = 'author,closed,mergedAt,updatedAt,title'
         extra_fields = self._cached_subprocess_check_output(
-            f'subprocess.pr.{github_pr["url"]}.v2',
+            f'subprocess.pr.{github_pr["url"]}.{extra_fields_json_arg}',
             cache_duration_seconds,
             lambda v: json.loads(v),
 
@@ -125,8 +127,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 'pr',
                 'view',
                 github_pr['url'],
-                # When adding fields here, ensure bumping the cache key above
-                '--json', 'author,mergedAt,updatedAt,title'
+                '--json', extra_fields_json_arg,
             ],
             encoding='utf-8',
         )
@@ -171,8 +172,15 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             logging.info('Migrating `snoozed` status value for PR %r', github_pr['url'])
             pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_UPDATE
 
-        if pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.MERGED) and github_pr['mergedAt']:
+        if (pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.MERGED)
+                and github_pr['mergedAt']
+                and not github_pr['closed']):
             pr['workboard_fields']['status'] = PullRequestStatus.MERGED
+            pr['workboard_fields']['last_change'] = time.time()
+
+        if (pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.CLOSED)
+                and github_pr['closed']):
+            pr['workboard_fields']['status'] = PullRequestStatus.CLOSED
             pr['workboard_fields']['last_change'] = time.time()
 
         if (pr['workboard_fields']['status'] == PullRequestStatus.SNOOZED_UNTIL_TIME
@@ -213,9 +221,11 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         try:
             already_updated_github_pr_urls = set()
 
+            pr_search_json_fields_arg = 'author,repository,state,updatedAt,url,title'
+
             # Own PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.own.{self.github_user}.v3',
+                f'subprocess.prs.own.{self.github_user}.{pr_search_json_fields_arg}',
                 600,
                 lambda v: json.loads(v),
 
@@ -224,8 +234,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     'search', 'prs',
                     '--author', self.github_user,
                     '--state', 'open',
-                    # When adding fields here, ensure bumping the cache key above
-                    '--json', 'author,repository,updatedAt,url,title'
+                    '--json', pr_search_json_fields_arg
                 ],
                 encoding='utf-8',
             ):
@@ -237,7 +246,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Assigned PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.assigned.{self.github_user}.v3',
+                f'subprocess.prs.assigned.{self.github_user}.{pr_search_json_fields_arg}',
                 600,
                 lambda v: json.loads(v),
 
@@ -246,8 +255,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     'search', 'prs',
                     '--assignee', self.github_user,
                     '--state', 'open',
-                    # When adding fields here, ensure bumping the cache key above
-                    '--json', 'author,repository,updatedAt,url,title'
+                    '--json', pr_search_json_fields_arg
                 ],
                 encoding='utf-8',
             ):
@@ -259,7 +267,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Review requested PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.review-requested.{self.github_user}.v3',
+                f'subprocess.prs.review-requested.{self.github_user}.{pr_search_json_fields_arg}',
                 600,
                 lambda v: json.loads(v),
 
@@ -268,8 +276,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     'search', 'prs',
                     '--review-requested', self.github_user,
                     '--state', 'open',
-                    # When adding fields here, ensure bumping the cache key above
-                    '--json', 'author,repository,updatedAt,url,title'
+                    '--json', pr_search_json_fields_arg
                 ],
                 encoding='utf-8',
             ):
@@ -301,6 +308,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 # PRs with latest changes are displayed on top, ordered by status.
                 key=lambda pr: (
                     {
+                        PullRequestStatus.CLOSED: 1,
                         PullRequestStatus.DELETED: 999,  # not applicable since we filtered those out
                         PullRequestStatus.MERGED: 1,
                         PullRequestStatus.MUST_REVIEW: 2,

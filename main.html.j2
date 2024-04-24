@@ -46,8 +46,12 @@
             font-family: 'DejaVu Sans Mono', monospace;
         }
 
+        td.status-closed {
+            background-color: #d53d26dd;
+        }
+
         td.status-merged {
-            background-color: #cfc;
+            background-color: #ccffccdd;
         }
 
         td.status-must-review {
@@ -55,12 +59,11 @@
             background-color: #ccffccdd;
         }
 
-        td.status-snoozed-until-time {
-            background-color: #dddddddd;
-            color: #999;
+        tr.status-snoozed-until-mentioned, tr.status-snoozed-until-time, tr.status-snoozed-until-update {
+            opacity: 0.55;
         }
 
-        td.status-snoozed-until-update {
+        td.status-snoozed-until-mentioned, td.status-snoozed-until-time, td.status-snoozed-until-update {
             background-color: #dddddddd;
             color: #999;
         }
@@ -153,7 +156,7 @@
     </thead>
     <tbody>
         {% for pr in pull_requests %}
-            <tr class="{% if last_clicked_github_pr_url == pr.github_fields.url %}last-clicked{% endif %}">
+            <tr class="status-{{ pr.workboard_fields.status }}{% if last_clicked_github_pr_url == pr.github_fields.url %} last-clicked{% endif %}">
                 <td>
                     <span class="repo-name">{{ pr.github_fields.repository.nameWithOwner }}</span>
                 </td>
@@ -205,7 +208,7 @@
                         </form>
                     {% endif %}
 
-                    {% if pr.workboard_fields.status == 'merged' %}
+                    {% if pr.workboard_fields.status in ('closed', 'merged') %}
                         <form action="/pr/delete" method="POST" onsubmit="return confirmDeletion()">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                             <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
