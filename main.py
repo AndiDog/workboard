@@ -62,9 +62,6 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
     github_user = None
     website_template = None
 
-    # Class-wide state
-    last_csrf_tokens = []
-
     def _add_render_only_fields(self, pr):
         pr = copy.deepcopy(pr)
         pr['render_only_fields'] = {
@@ -318,8 +315,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             )
 
             csrf_token = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(100))
-            self.last_csrf_tokens.append(csrf_token)
-            del self.last_csrf_tokens[0:max(0, len(self.last_csrf_tokens) - 10)]  # expire old ones
+            self.cache.add(f'csrf.{csrf_token}', True, 14400)
 
             data = {
                 'csrf_token': csrf_token,
@@ -348,7 +344,9 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def _get_protected_post_params(self):
         params = dict(parse_qsl(self.rfile.read(int(self.headers['Content-Length'])).decode('ascii')))
-        if params['csrf_token'] not in self.last_csrf_tokens:
+        if len(params['csrf_token']) != 100:
+            raise RuntimeError('Invalid or expired CSRF token (could be an attack)')
+        if not self.cache.get(f'csrf.{params['csrf_token']}'):
             raise RuntimeError('Invalid or expired CSRF token (could be an attack)')
         return params
 
