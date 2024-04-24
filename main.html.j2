@@ -74,14 +74,58 @@
             font-weight: bold;
             color: #f20;
         }
+
+        /* CSS-only spinner from https://loading.io/css/ */
+        .lds-dual-ring,
+        .lds-dual-ring:after {
+          box-sizing: border-box;
+        }
+        .lds-dual-ring {
+          display: inline-block;
+          width: 80px;
+          height: 80px;
+        }
+        .lds-dual-ring:after {
+          content: " ";
+          display: block;
+          width: 64px;
+          height: 64px;
+          margin: 8px;
+          border-radius: 50%;
+          border: 6.4px solid currentColor;
+          border-color: currentColor transparent currentColor transparent;
+          animation: lds-dual-ring 1.2s linear infinite;
+        }
+        @keyframes lds-dual-ring {
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
+        }
     </style>
     <script type="text/javascript">
         function confirmDeletion() {
             return window.confirm('Really forget about this PR? It will only be re-added automatically if it is reopened and authored/assigned/review-requested by you.');
         }
+
+        function reload(event) {
+            event.preventDefault();
+
+            document.body.innerHTML = '<p>Reloading workboard. This may take a minute, or even fail in case of rate limit, if PR updates must be fetched from the GitHub API.</p><div class="lds-dual-ring"></div>';
+
+            // Give the above a chance to render
+            window.setTimeout(function() {
+                location.reload();
+            }, 10);
+        }
     </script>
 </head>
 <body>
+<p class="usage-hint">
+<a href="#" onclick="reload(event)">Reload</a> this page every time you want to get updates of this PR list, for example <em>before</em> you start working on reviews. GitHub API requests are cached, so it makes no sense to hit the reload button repeatedly.
+</p>
 <table class="pull-requests">
     <thead>
         <tr>
