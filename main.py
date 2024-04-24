@@ -64,10 +64,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
     def _add_render_only_fields(self, pr):
         pr = copy.deepcopy(pr)
         pr['render_only_fields'] = {
-            'author_is_self': (
-                pr['github_fields']['author']['type'] == 'User'
-                and pr['github_fields']['author']['login'] == self.github_user
-            ),
+            'author_is_self': pr['github_fields']['author']['login'] == self.github_user,
             'last_updated_desc': timeago.format(
                 datetime.datetime.fromtimestamp(github_datetime_to_timestamp(pr['github_fields']['updatedAt'])),
                 locale='en'),
@@ -95,10 +92,15 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def _fetch_remaining_github_pr_fields(self, github_pr):
         """
-        Since the search API doesn't support all fields, such as `merged`, we fetch those separately
+        Since the search API doesn't support all fields, such as `merged`, we fetch those separately.
+
+        This function may be called on `gh search prs` items, but also on database items, such as PRs which are
+        merged/closed by now and therefore aren't returned by our `gh search prs` command lines. It must behave
+        reasonably on database items: those might have outdated information, so we fetch all fields again to ensure
+        everything is up to date with the actual values in GitHub.
         """
         extra_fields = self._cached_subprocess_check_output(
-            f'subprocess.pr.{github_pr["url"]}.v1',
+            f'subprocess.pr.{github_pr["url"]}.v2',
             600,  # TODO: Cache for longer if last update of PR is very long ago (months/years)
             lambda v: json.loads(v),
 
@@ -108,7 +110,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 'view',
                 github_pr['url'],
                 # When adding fields here, ensure bumping the cache key above
-                '--json', 'mergedAt'
+                '--json', 'author,mergedAt,updatedAt,title'
             ],
             encoding='utf-8',
         )
@@ -258,7 +260,14 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             pull_requests_from_db = self.db.get('pull_requests', {})
             missing_github_pr_urls = set(pull_requests_from_db.keys()) - already_updated_github_pr_urls
-            assert not missing_github_pr_urls, f'TODO: Implement fetching updates for merged/closed PRs. Remaining: {missing_github_pr_urls}'
+            # Only sorted to get the same behavior every time
+            for github_pr in map(lambda pr_url: pull_requests_from_db[pr_url]['github_fields'], sorted(missing_github_pr_urls)):
+                # PR could be closed/merged or otherwise not contained in the above queries. Since it's already in the
+                # database, the user is interested in seeing updates, so we treat it like all others, of course.
+                assert github_pr['url'] not in already_updated_github_pr_urls  # we loop through `missing_github_pr_urls`
+                github_pr = self._fetch_remaining_github_pr_fields(github_pr)
+                self._update_db_from_github_pr(github_pr)
+                already_updated_github_pr_urls.add(github_pr['url'])
 
             pull_requests_to_render = sorted(
                 map(self._add_render_only_fields, pull_requests_from_db.values()),
