@@ -27,6 +27,10 @@ PORT = 16666
 
 
 class PullRequestStatus:
+    # Wnen adding new status values here, ensure amending all code that tries to handle every value (CSS classes,
+    # sorting of the rendered list, ...)
+
+    DELETED = 'deleted'
     MERGED = 'merged'
     MUST_REVIEW = 'must-review'
 
@@ -151,6 +155,11 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             pr['workboard_fields'].setdefault('last_change', github_datetime_to_timestamp(github_pr['updatedAt']))
 
             self._update_status_from_github_pr(pr, github_pr)
+
+            if (pr['workboard_fields']['status'] == PullRequestStatus.DELETED
+                    and pr['workboard_fields']['delete_after'] <= time.time()):
+                logging.info('Deleting PR %r from database', github_pr['url'])
+
             self._validate_pull_requests(pull_requests)
             self.db.set('pull_requests', pull_requests)
 
@@ -165,7 +174,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             logging.info('Migrating `snoozed` status value for PR %r', github_pr['url'])
             pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_UPDATE
 
-        if pr['workboard_fields']['status'] != PullRequestStatus.MERGED and github_pr['mergedAt']:
+        if pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.MERGED) and github_pr['mergedAt']:
             pr['workboard_fields']['status'] = PullRequestStatus.MERGED
             pr['workboard_fields']['last_change'] = time.time()
 
@@ -285,10 +294,17 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 already_updated_github_pr_urls.add(github_pr['url'])
 
             pull_requests_to_render = sorted(
-                map(self._add_render_only_fields, pull_requests_from_db.values()),
+                map(
+                    self._add_render_only_fields,
+                    filter(
+                        lambda pr: pr['workboard_fields']['status'] != PullRequestStatus.DELETED,
+                        pull_requests_from_db.values(),
+                    ),
+                ),
                 # PRs with latest changes are displayed on top, ordered by status.
                 key=lambda pr: (
                     {
+                        PullRequestStatus.DELETED: 999,  # not applicable since we filtered those out
                         PullRequestStatus.MERGED: 1,
                         PullRequestStatus.MUST_REVIEW: 2,
                         PullRequestStatus.SNOOZED_UNTIL_MENTIONED: 5,
@@ -344,11 +360,20 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(pr_url, str) or len(pr_url) > 300:
                 raise ValueError('Invalid pr_url')
 
-            logging.info('Deleting PR %r', pr_url)
+            logging.info('Marking PR %r as deleted', pr_url)
 
             with self.db.transact():
                 pull_requests = self.db['pull_requests']
-                del pull_requests[pr_url]
+
+                # We cannot simply remove the PR from `pull_requests` since a cached "list some PRs" command output
+                # may re-add it. Instead, we simply update the status and remove the entry eventually.
+                if pr_url not in pull_requests:
+                    raise ValueError('PR not found, thus cannot be deleted')
+
+                pr = pull_requests[pr_url]
+                pr['workboard_fields']['status'] = PullRequestStatus.DELETED
+                pr['workboard_fields']['last_change'] = time.time()
+                pr['workboard_fields']['delete_after'] = time.time() + 86400 * 30
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
 
