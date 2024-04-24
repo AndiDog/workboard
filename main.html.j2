@@ -189,7 +189,6 @@
                         <form action="/pr/snooze-until-update" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                             <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
-                            <input type="hidden" name="current_updated_at" value="{{ pr.github_fields.updatedAt }}" />
 
                             <button type="submit">
                                 Snooze until update

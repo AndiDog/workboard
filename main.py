@@ -73,29 +73,29 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         }
         return pr
 
-    def _cached_subprocess_check_output(self, cache_key, duration_seconds, mutate_before_store_in_cache=None, *args, **kwargs):
+    def _cached_subprocess_check_output(self, *, cache_key, cache_duration_seconds, read_from_cache=True, mutate_before_store_in_cache=None, subprocess_kwargs):
         with self.cache.transact():
-            value = self.cache.get(cache_key)
+            value = self.cache.get(cache_key) if read_from_cache else None
             if value is not None:
                 logging.debug(
-                    'Using cached value for command output of cache key %r (cache duration: %ds)',
+                    'Using cached value for command output of cache key %r (cache duration: %s)',
                     cache_key,
-                    duration_seconds)
+                    cache_duration_seconds)
                 return value
 
-            logging.debug('Running command for cache key %r (cache duration: %ds)', cache_key, duration_seconds)
-            proc = subprocess.Popen(*args, **kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            logging.debug('Running command for cache key %r (cache duration: %ds)', cache_key, cache_duration_seconds)
+            proc = subprocess.Popen(**subprocess_kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (stdout, stderr) = proc.communicate()
             if proc.returncode:
                 raise RuntimeError(f'Command failed for cache key {cache_key!r}. Error output was: {stderr!r}')
             value = stdout
             if mutate_before_store_in_cache is not None:
                 value = mutate_before_store_in_cache(value)
-            self.cache.set(cache_key, value, expire=duration_seconds)
+            self.cache.set(cache_key, value, expire=cache_duration_seconds)
 
         return value
 
-    def _fetch_remaining_github_pr_fields(self, github_pr):
+    def _fetch_remaining_github_pr_fields(self, github_pr, read_from_cache=True):
         """
         Since the search API doesn't support all fields, such as `merged`, we fetch those separately.
 
@@ -118,23 +118,36 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
         extra_fields_json_arg = 'author,closed,mergedAt,updatedAt,title'
         extra_fields = self._cached_subprocess_check_output(
-            f'subprocess.pr.{github_pr["url"]}.{extra_fields_json_arg}',
-            cache_duration_seconds,
-            lambda v: json.loads(v),
-
-            [
-                'gh',
-                'pr',
-                'view',
-                github_pr['url'],
-                '--json', extra_fields_json_arg,
-            ],
-            encoding='utf-8',
+            cache_key=f'subprocess.pr.{github_pr["url"]}.{extra_fields_json_arg}',
+            cache_duration_seconds=cache_duration_seconds,
+            mutate_before_store_in_cache=lambda v: json.loads(v),
+            read_from_cache=read_from_cache,
+            subprocess_kwargs=dict(
+                args=[
+                    'gh',
+                    'pr',
+                    'view',
+                    github_pr['url'],
+                    '--json', extra_fields_json_arg,
+                ],
+                encoding='utf-8',
+            ),
         )
 
         github_pr = copy.deepcopy(github_pr)
         github_pr.update(extra_fields)
         return github_pr
+
+    def _refetch_and_store_github_pr(self, pr_url):
+        """
+        Refetch PR without reading stale value from cache.
+
+        This only refetches fields requested in `_fetch_remaining_github_pr_fields`, such as `mergedAt`!
+        """
+        with self.db.transact():
+            github_pr = self.db['pull_requests'][pr_url]['github_fields']
+            github_pr = self._fetch_remaining_github_pr_fields(github_pr, read_from_cache=False)
+            self._update_db_from_github_pr(github_pr)
 
     def _update_db_from_github_pr(self, github_pr):
         with self.db.transact():
@@ -225,11 +238,11 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Own PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.own.{self.github_user}.{pr_search_json_fields_arg}',
-                600,
-                lambda v: json.loads(v),
-
-                [
+                cache_key=f'subprocess.prs.own.{self.github_user}.{pr_search_json_fields_arg}',
+                cache_duration_seconds=600,
+                mutate_before_store_in_cache=lambda v: json.loads(v),
+                subprocess_kwargs=dict(
+                    args=[
                     'gh',
                     'search', 'prs',
                     '--author', self.github_user,
@@ -237,6 +250,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     '--json', pr_search_json_fields_arg
                 ],
                 encoding='utf-8',
+                ),
             ):
                 if github_pr['url'] in already_updated_github_pr_urls:
                     continue
@@ -246,11 +260,11 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Assigned PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.assigned.{self.github_user}.{pr_search_json_fields_arg}',
-                600,
-                lambda v: json.loads(v),
-
-                [
+                cache_key=f'subprocess.prs.assigned.{self.github_user}.{pr_search_json_fields_arg}',
+                cache_duration_seconds=600,
+                mutate_before_store_in_cache=lambda v: json.loads(v),
+                subprocess_kwargs=dict(
+                    args=[
                     'gh',
                     'search', 'prs',
                     '--assignee', self.github_user,
@@ -258,6 +272,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     '--json', pr_search_json_fields_arg
                 ],
                 encoding='utf-8',
+                ),
             ):
                 if github_pr['url'] in already_updated_github_pr_urls:
                     continue
@@ -267,11 +282,11 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             # Review requested PRs
             for github_pr in self._cached_subprocess_check_output(
-                f'subprocess.prs.review-requested.{self.github_user}.{pr_search_json_fields_arg}',
-                600,
-                lambda v: json.loads(v),
-
-                [
+                cache_key=f'subprocess.prs.review-requested.{self.github_user}.{pr_search_json_fields_arg}',
+                cache_duration_seconds=600,
+                mutate_before_store_in_cache=lambda v: json.loads(v),
+                subprocess_kwargs=dict(
+                    args=[
                     'gh',
                     'search', 'prs',
                     '--review-requested', self.github_user,
@@ -279,6 +294,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     '--json', pr_search_json_fields_arg
                 ],
                 encoding='utf-8',
+                ),
             ):
                 if github_pr['url'] in already_updated_github_pr_urls:
                     continue
@@ -485,11 +501,12 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(pr_url, str) or len(pr_url) > 300:
                 raise ValueError('Invalid pr_url')
 
+            # The user may have just done something on the PR, such as triggering a test, commenting, leaving a review
+            # comment or the like. Therefore, we need to update our stale `updatedAt` field in the database and only
+            # want to return from snooze once another update happened after the user clicked the snooze button.
             # Format `2023-12-01T10:45:55Z`
-            snooze_until_updated_at_changed_from = params['current_updated_at']
-            if (not isinstance(snooze_until_updated_at_changed_from, str)
-                    or len(snooze_until_updated_at_changed_from) > 30):
-                raise ValueError('Invalid current_updated_at')
+            pr = self._refetch_and_store_github_pr(pr_url)
+            snooze_until_updated_at_changed_from = pr['github_fields']['updatedAt']
 
             logging.info(
                 'Snoozing PR %r until updatedAt changed away from %r', pr_url, snooze_until_updated_at_changed_from)
