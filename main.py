@@ -116,7 +116,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         else:
             cache_duration_seconds = 600
 
-        extra_fields_json_arg = 'author,closed,mergedAt,updatedAt,title'
+        extra_fields_json_arg = 'author,closed,state,updatedAt,title'
         extra_fields = self._cached_subprocess_check_output(
             cache_key=f'subprocess.pr.{github_pr["url"]}.{extra_fields_json_arg}',
             cache_duration_seconds=cache_duration_seconds,
@@ -142,7 +142,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         """
         Refetch PR without reading stale value from cache.
 
-        This only refetches fields requested in `_fetch_remaining_github_pr_fields`, such as `mergedAt`!
+        This only refetches fields requested in `_fetch_remaining_github_pr_fields`, such as `updatedAt`!
         """
         with self.db.transact():
             github_pr = self.db['pull_requests'][pr_url]['github_fields']
@@ -186,12 +186,13 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED_UNTIL_UPDATE
 
         if (pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.MERGED)
-                and github_pr['mergedAt']
-                and not github_pr['closed']):
+                and github_pr['state'].lower() == 'merged'
+                and github_pr['closed']):
             pr['workboard_fields']['status'] = PullRequestStatus.MERGED
             pr['workboard_fields']['last_change'] = time.time()
 
         if (pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.CLOSED)
+                and github_pr['state'].lower() == 'closed'
                 and github_pr['closed']):
             pr['workboard_fields']['status'] = PullRequestStatus.CLOSED
             pr['workboard_fields']['last_change'] = time.time()
