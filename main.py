@@ -75,10 +75,13 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         with self.db.transact():
             value = self.db.get(cache_key)
             if value is not None:
-                logging.debug('Using cached value for command output of cache key %r', cache_key)
+                logging.debug(
+                    'Using cached value for command output of cache key %r (cache duration: %ds)',
+                    cache_key,
+                    duration_seconds)
                 return value
 
-            logging.debug('Running command for cache key %r', cache_key)
+            logging.debug('Running command for cache key %r (cache duration: %ds)', cache_key, duration_seconds)
             proc = subprocess.Popen(*args, **kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (stdout, stderr) = proc.communicate()
             if proc.returncode:
@@ -99,9 +102,21 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         reasonably on database items: those might have outdated information, so we fetch all fields again to ensure
         everything is up to date with the actual values in GitHub.
         """
+
+        updated_seconds_ago = abs(time.time() - github_datetime_to_timestamp(github_pr['updatedAt']))
+        # Cache for longer if last update of PR is long ago
+        if updated_seconds_ago > 86400 * 365:
+            cache_duration_seconds = 14400
+        elif updated_seconds_ago > 86400 * 7:
+            cache_duration_seconds = 3600
+        elif updated_seconds_ago > 86400 * 2:
+            cache_duration_seconds = 1800
+        else:
+            cache_duration_seconds = 600
+
         extra_fields = self._cached_subprocess_check_output(
             f'subprocess.pr.{github_pr["url"]}.v2',
-            600,  # TODO: Cache for longer if last update of PR is very long ago (months/years)
+            cache_duration_seconds,
             lambda v: json.loads(v),
 
             [
