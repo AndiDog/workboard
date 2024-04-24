@@ -3,7 +3,6 @@ import copy
 import json
 import html
 import http.server
-import jinja2
 import logging
 import os
 import random
@@ -15,6 +14,9 @@ import threading
 import time
 import traceback
 from urllib.parse import parse_qsl
+
+import diskcache
+import jinja2
 import yaml
 
 
@@ -28,34 +30,51 @@ class PullRequestStatus:
 
 class ServerHandler(http.server.SimpleHTTPRequestHandler):
     # Must be set class-wide from configuration files (read-only)
-    cache_file_path = None
+    cache = None
     github_user = None
-    db_file_path = None
     website_template = None
 
     # Class-wide state
     last_csrf_tokens = []
 
-    def _fill_pr_fields_from_db(self, pr, db):
-        pr_by_url = db.setdefault('pull_requests', {}).setdefault(pr['url'], {})
-        pr_by_url.setdefault('status', PullRequestStatus.UNKNOWN)
-        pr = copy.deepcopy(pr)
-        pr.setdefault('db', {})
-        pr['db'] = pr_by_url
-        return pr
+    def _cached_subprocess_check_output(self, cache_key, duration_seconds, mutate_before_store_in_cache=None, *args, **kwargs):
+        with self.db.transact():
+            value = self.db.get(cache_key)
+            if value is not None:
+                logging.debug('Using cached value for key %r instead of running process')
+                return value
 
-    def _read_db(self):
-        with open(self.db_file_path) as f:
-            db = yaml.safe_load(f)
-        if db is None:
-            logging.warning('Database is empty (assuming this is a first-time startup)')
-            db = {}
-        return db
+            value = subprocess.check_output(*args, **kwargs)
+            if mutate_before_store_in_cache is not None:
+                value = mutate_before_store_in_cache(value)
+            self.db.set(cache_key, value, expire=duration_seconds)
 
-    def _write_db(self, db):
-        with open(self.db_file_path, 'r+') as out:
-            yaml.safe_dump(db, out)
-            out.truncate()
+        return value
+
+    def _fill_pr_fields_from_db(self, github_pr):
+        with self.db.transact():
+            # Set defaults if keys don't exist
+            self.db.add('pull_requests', {})
+
+            pull_requests = self.db.get('pull_requests', {})
+            if not pull_requests:
+                logging.debug('Database has no pull requests yet')
+            pr_stored = pull_requests.setdefault(github_pr['url'], {})
+            pr_stored.setdefault('status', PullRequestStatus.UNKNOWN)
+
+            # Add database values as `stored` field. This is used for rendering and other purposes.
+            pr = copy.deepcopy(github_pr)
+            pr.setdefault('stored', {})
+            pr['stored'] = pr_stored
+
+            self._update_pr(pr)
+            self.db.set('pull_requests', pull_requests)
+
+            return pr
+
+    def _update_pr(self, pr):
+        # TODO
+        return
 
     def do_GET(self):
         if self.path == '/favicon.ico':
@@ -67,17 +86,22 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             raise RuntimeError(f'This app has only URL path `/` (not {self.path!r})')
 
         try:
-            db = self._read_db()
+            my_pull_requests = self._cached_subprocess_check_output(
+                f'subprocess.prs.{self.github_user}.v1',
+                600,
+                lambda v: json.loads(v),
 
-            my_pull_requests = json.loads(subprocess.check_output([
-                'gh',
-                'search', 'prs',
-                '--author', self.github_user,
-                '--state', 'open',
-                '--json', 'repository,updatedAt,url,title'
-            ], encoding='utf-8'))
+                [
+                    'gh',
+                    'search', 'prs',
+                    '--author', self.github_user,
+                    '--state', 'open',
+                    '--json', 'repository,updatedAt,url,title'
+                ],
+                encoding='utf-8',
+            )
 
-            my_pull_requests = list(self._fill_pr_fields_from_db(pr, db) for pr in my_pull_requests)
+            my_pull_requests = list(self._fill_pr_fields_from_db(pr) for pr in my_pull_requests)
 
             csrf_token = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(100))
             self.last_csrf_tokens.append(csrf_token)
@@ -89,8 +113,6 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 'my_pull_requests': my_pull_requests,
             }
             res = self.website_template.render(data, undefined=jinja2.StrictUndefined).encode('utf-8')
-
-            self._write_db(db)
 
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -130,11 +152,12 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     or len(snooze_until_updated_at_changed_from) > 30):
                 raise ValueError('Invalid current_updated_at')
 
-            db = self._read_db()
-            pr_by_url = db['pull_requests'][pr_url]
-            pr_by_url['status'] = PullRequestStatus.SNOOZED
-            pr_by_url['snooze_until_updated_at_changed_from'] = snooze_until_updated_at_changed_from
-            self._write_db(db)
+            with self.db.transact():
+                pull_requests = self.db['pull_requests']
+                pr = pull_requests[pr_url]
+                pr['status'] = PullRequestStatus.SNOOZED
+                pr['snooze_until_updated_at_changed_from'] = snooze_until_updated_at_changed_from
+                self.db.set('pull_requests', pull_requests)
 
             logging.info(
                 'Snoozing PR %r until updatedAt changed away from %r', pr_url, snooze_until_updated_at_changed_from)
@@ -176,23 +199,34 @@ def main():
         return current
     ServerHandler.github_user = get_cfg_path('github', 'user')
 
-    ServerHandler.db_file_path = os.path.abspath('workboard.db')
-    if not os.path.exists(ServerHandler.db_file_path):
-            raise RuntimeError(
-                f'Please create {ServerHandler.db_file_path!r} if this is the first time starting this '
-                'application. Not the first time? The file cannot be found and this is a hard error.')
+    db_dir = os.path.abspath('workboard.db')
+    if not os.path.exists(db_dir):
+        raise RuntimeError(
+            f'Please create the database directory {db_dir!r} if this is the first time '
+            'starting this application. Not the first time? The directory cannot be found and this is a hard error.')
 
     with open('main.html.j2') as f:
         ServerHandler.website_template = jinja2.Template(f.read())
+
+    # The diskcache module uses a directory for the cache
+    ServerHandler.cache = diskcache.Cache(os.path.abspath('workboard.cache'))
+    ServerHandler.db = diskcache.Cache(os.path.abspath('workboard.db'))
+
+    if len(ServerHandler.db) == 0:
+        logging.warning(f'Database {db_dir!r} is empty (assuming this is a first-time startup)')
+        ServerHandler.db.set('initialized', True, expire=None)
 
     httpd = socketserver.TCPServer(('localhost', PORT), ServerHandler, bind_and_activate=False)
     httpd.allow_reuse_address = True
     httpd.server_bind()
     httpd.server_activate()
 
-    logging.info('Serving at port %d', PORT)
-    httpd.serve_forever()
-
+    try:
+        logging.info('Serving at port %d', PORT)
+        httpd.serve_forever()
+    finally:
+        ServerHandler.db.close()
+        ServerHandler.cache.close()
 
 if __name__ == '__main__':
     sys.exit(main())

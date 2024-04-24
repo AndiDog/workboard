@@ -69,8 +69,8 @@
                 <td>
                     <span class="repo-name">{{ pr.repository.nameWithOwner }}</span>
                 </td>
-                <td class="status-{{ pr.db.status }}">
-                    {{ pr.db.status }}
+                <td class="status-{{ pr.stored.status }}">
+                    {{ pr.stored.status }}
                 </td>
                 <td>
                     <a href="{{ pr.url }}" class="pr-link">{{ pr.title }}</a>

@@ -1,5 +1,6 @@
 # Personal configuration file
-workboard.yaml
+/workboard.yaml
 
-# Database
-workboard.db
+# Databases
+/workboard.cache
+/workboard.db
