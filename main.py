@@ -70,10 +70,10 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         with self.db.transact():
             value = self.db.get(cache_key)
             if value is not None:
-                logging.info('Using cached value for command output of cache key %r', cache_key)
+                logging.debug('Using cached value for command output of cache key %r', cache_key)
                 return value
 
-            logging.info('Running command for cache key %r', cache_key)
+            logging.debug('Running command for cache key %r', cache_key)
             proc = subprocess.Popen(*args, **kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (stdout, stderr) = proc.communicate()
             if proc.returncode:
