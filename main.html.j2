@@ -44,7 +44,11 @@
         }
 
         td.status-unknown {
-            background-color: #cfc; /* PR not known yet */
+            background-color: #f2f2f2; /* PR not known yet */
+        }
+
+        td.status-updated-after-snooze {
+            background-color: #cfc;
         }
     </style>
     <script type="text/javascript">
@@ -60,31 +64,37 @@
             <th>Repo</th>
             <th>Status</th>
             <th>PR link</th>
+            <th>Last updated in GitHub</th>
             <th>Action</th>
         </tr>
     </thead>
     <tbody>
-        {% for pr in my_pull_requests|sort(attribute='url') %}
+        {% for pr in pull_requests %}
             <tr>
                 <td>
-                    <span class="repo-name">{{ pr.repository.nameWithOwner }}</span>
+                    <span class="repo-name">{{ pr.github_fields.repository.nameWithOwner }}</span>
                 </td>
-                <td class="status-{{ pr.stored.status }}">
-                    {{ pr.stored.status }}
-                </td>
-                <td>
-                    <a href="{{ pr.url }}" class="pr-link">{{ pr.title }}</a>
+                <td class="status-{{ pr.workboard_fields.status }}">
+                    {{ pr.workboard_fields.status }}
                 </td>
                 <td>
-                    <form action="/pr/snooze" method="POST">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                        <input type="hidden" name="pr_url" value="{{ pr.url }}" />
-                        <input type="hidden" name="current_updated_at" value="{{ pr.updatedAt }}" />
+                    <a href="{{ pr.github_fields.url }}" class="pr-link" target="_blank" rel="noopener">{{ pr.github_fields.title }}</a>
+                </td>
+                <td>
+                    {{ pr.render_only_fields.last_updated_desc }}
+                </td>
+                <td>
+                    {% if pr.workboard_fields.status != "snoozed" %}
+                        <form action="/pr/snooze" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                            <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
+                            <input type="hidden" name="current_updated_at" value="{{ pr.github_fields.updatedAt }}" />
 
-                        <button type="submit">
-                            Snooze until update
-                        </button>
-                    </form>
+                            <button type="submit">
+                                Snooze until update
+                            </button>
+                        </form>
+                    {% endif %}
                 </td>
             </tr>
         {% endfor %}

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import copy
+import datetime
+import doctest
 import json
 import html
 import http.server
@@ -17,6 +19,7 @@ from urllib.parse import parse_qsl
 
 import diskcache
 import jinja2
+import timeago
 import yaml
 
 
@@ -24,8 +27,23 @@ PORT = 16666
 
 
 class PullRequestStatus:
+    MERGED = 'merged'
     SNOOZED = 'snoozed'
+    UPDATED_AFTER_SNOOZE = 'updated-after-snooze'
     UNKNOWN = 'unknown'
+
+
+def github_datetime_to_timestamp(s):
+    """
+    >>> github_datetime_to_timestamp('2023-12-01T10:45:55Z')
+    1701427555
+    >>> github_datetime_to_timestamp('2023-12-01T10:45:55ABC')  # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+    ...
+    ValueError: ...
+    """
+
+    return int(datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp())
 
 
 class ServerHandler(http.server.SimpleHTTPRequestHandler):
@@ -37,44 +55,102 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
     # Class-wide state
     last_csrf_tokens = []
 
+    def _add_render_only_fields(self, pr):
+        pr = copy.deepcopy(pr)
+        pr['render_only_fields'] = {
+            'last_updated_desc': timeago.format(
+                datetime.datetime.fromtimestamp(github_datetime_to_timestamp(pr['github_fields']['updatedAt'])),
+                locale='en'),
+        }
+        return pr
+
     def _cached_subprocess_check_output(self, cache_key, duration_seconds, mutate_before_store_in_cache=None, *args, **kwargs):
         with self.db.transact():
             value = self.db.get(cache_key)
             if value is not None:
-                logging.debug('Using cached value for key %r instead of running process')
+                logging.debug('Using cached value for key %r instead of running process', cache_key)
                 return value
 
-            value = subprocess.check_output(*args, **kwargs)
+            proc = subprocess.Popen(*args, **kwargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            (stdout, stderr) = proc.communicate()
+            if proc.returncode:
+                raise RuntimeError(f'Command failed for cache key {cache_key!r}. Error output was: {stderr!r}')
+            value = stdout
             if mutate_before_store_in_cache is not None:
                 value = mutate_before_store_in_cache(value)
             self.db.set(cache_key, value, expire=duration_seconds)
 
         return value
 
-    def _fill_pr_fields_from_db(self, github_pr):
+    def _fetch_remaining_github_pr_fields(self, github_pr):
+        """
+        Since the search API doesn't support all fields, such as `merged`, we fetch those separately
+        """
+        extra_fields = self._cached_subprocess_check_output(
+            f'subprocess.pr.{github_pr["url"]}.v1',
+            600,
+            lambda v: json.loads(v),
+
+            [
+                'gh',
+                'pr',
+                'view',
+                github_pr['url'],
+                # When adding fields here, ensure bumping the cache key above
+                '--json', 'mergedAt'
+            ],
+            encoding='utf-8',
+        )
+
+        github_pr = copy.deepcopy(github_pr)
+        github_pr.update(extra_fields)
+        return github_pr
+
+    def _update_db_from_github_pr(self, github_pr):
         with self.db.transact():
-            # Set defaults if keys don't exist
-            self.db.add('pull_requests', {})
-
+            # GitHub PR URL => {'github_fields': {...}, 'workboard_fields': {...}}
             pull_requests = self.db.get('pull_requests', {})
+
             if not pull_requests:
-                logging.debug('Database has no pull requests yet')
-            pr_stored = pull_requests.setdefault(github_pr['url'], {})
-            pr_stored.setdefault('status', PullRequestStatus.UNKNOWN)
+                logging.debug('Database has no pull requests')
 
-            # Add database values as `stored` field. This is used for rendering and other purposes.
-            pr = copy.deepcopy(github_pr)
-            pr.setdefault('stored', {})
-            pr['stored'] = pr_stored
+            pr = pull_requests.setdefault(github_pr['url'], {})
+            pr['github_fields'] = copy.deepcopy(github_pr)
+            pr.setdefault('workboard_fields', {})
 
-            self._update_pr(pr)
+            # These are the only available fields of ours if PR is inserted the first time
+            pr['workboard_fields'].setdefault('status', PullRequestStatus.UNKNOWN)
+            pr['workboard_fields'].setdefault('last_change', github_datetime_to_timestamp(github_pr['updatedAt']))
+
+            self._update_status_from_github_pr(pr, github_pr)
+            self._validate_pull_requests(pull_requests)
             self.db.set('pull_requests', pull_requests)
 
-            return pr
+    def _update_status_from_github_pr(self, pr, github_pr):
+        # See GitHub PR fields https://docs.github.com/en/graphql/reference/objects#pullrequest.
+        # If any new fields are required here, add them to our `gh search prs [...] --json` command or it won't
+        # be fetched.
 
-    def _update_pr(self, pr):
-        # TODO
-        return
+        if pr['workboard_fields']['status'] != PullRequestStatus.MERGED and github_pr['mergedAt']:
+            pr['workboard_fields']['status'] = PullRequestStatus.MERGED
+            pr['workboard_fields']['last_change'] = time.time()
+
+        if pr['workboard_fields']['status'] == PullRequestStatus.SNOOZED and github_pr.get('updatedAt') and github_pr['updatedAt'] != pr['workboard_fields']['snooze_until_updated_at_changed_from']:
+            logging.info(
+                'Snoozed PR %r was updated between %r and %r, unsnoozing it',
+                github_pr['url'], pr['workboard_fields']['snooze_until_updated_at_changed_from'], github_pr['updatedAt'])
+            pr['workboard_fields']['status'] = PullRequestStatus.UPDATED_AFTER_SNOOZE
+            pr['workboard_fields']['last_change'] = time.time()
+            del pr['workboard_fields']['snooze_until_updated_at_changed_from']
+
+    @staticmethod
+    def _validate_pull_requests(pull_requests):
+        # Some checks for logic errors (important until we use static typing checks)
+        for url, pr in pull_requests.items():
+            assert url.startswith('http')
+            # `render_only_fields` not wanted in storage
+            unwanted_fields = set(pr.keys()) - {'github_fields', 'workboard_fields'}
+            assert not unwanted_fields, f'Unwanted fields in PR object: {unwanted_fields}'
 
     def do_GET(self):
         if self.path == '/favicon.ico':
@@ -86,7 +162,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             raise RuntimeError(f'This app has only URL path `/` (not {self.path!r})')
 
         try:
-            my_pull_requests = self._cached_subprocess_check_output(
+            for github_pr in self._cached_subprocess_check_output(
                 f'subprocess.prs.{self.github_user}.v1',
                 600,
                 lambda v: json.loads(v),
@@ -96,12 +172,19 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                     'search', 'prs',
                     '--author', self.github_user,
                     '--state', 'open',
+                    # When adding fields here, ensure bumping the cache key above
                     '--json', 'repository,updatedAt,url,title'
                 ],
                 encoding='utf-8',
-            )
+            ):
+                github_pr = self._fetch_remaining_github_pr_fields(github_pr)
+                self._update_db_from_github_pr(github_pr)
 
-            my_pull_requests = list(self._fill_pr_fields_from_db(pr) for pr in my_pull_requests)
+            pull_requests = sorted(
+                map(self._add_render_only_fields, self.db.get('pull_requests', {}).values()),
+                # PRs with latest changes are displayed on top, unless they're snoozed
+                key=lambda pr: (pr['workboard_fields']['status'] == PullRequestStatus.SNOOZED, -pr['workboard_fields'].get('last_change', 2**63)),
+            )
 
             csrf_token = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(100))
             self.last_csrf_tokens.append(csrf_token)
@@ -110,7 +193,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             data = {
                 'csrf_token': csrf_token,
                 'github_user': self.github_user,
-                'my_pull_requests': my_pull_requests,
+                'pull_requests': pull_requests,
             }
             res = self.website_template.render(data, undefined=jinja2.StrictUndefined).encode('utf-8')
 
@@ -155,8 +238,10 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             with self.db.transact():
                 pull_requests = self.db['pull_requests']
                 pr = pull_requests[pr_url]
-                pr['status'] = PullRequestStatus.SNOOZED
-                pr['snooze_until_updated_at_changed_from'] = snooze_until_updated_at_changed_from
+                pr['workboard_fields']['status'] = PullRequestStatus.SNOOZED
+                pr['workboard_fields']['last_change'] = time.time()
+                pr['workboard_fields']['snooze_until_updated_at_changed_from'] = snooze_until_updated_at_changed_from
+                self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
 
             logging.info(
@@ -229,4 +314,7 @@ def main():
         ServerHandler.cache.close()
 
 if __name__ == '__main__':
+    if doctest.testmod()[0]:
+        sys.exit(1)
+
     sys.exit(main())
