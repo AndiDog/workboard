@@ -1,5 +1,5 @@
 # Personal configuration file
-github-pr-board.yaml
+workboard.yaml
 
 # Database
-github-pr-board.db
+workboard.db

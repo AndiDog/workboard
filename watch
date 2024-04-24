@@ -3,4 +3,4 @@ set -eu
 
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck disable=SC2012
-ls main.html.j2 main.py github-pr-board.yaml | entr -cc -r .venv/bin/python3 main.py
+ls main.html.j2 main.py workboard.yaml | entr -cc -r .venv/bin/python3 main.py

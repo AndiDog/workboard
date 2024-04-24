@@ -17,6 +17,7 @@ import traceback
 from urllib.parse import parse_qsl
 import yaml
 
+
 PORT = 16666
 
 
@@ -27,6 +28,7 @@ class PullRequestStatus:
 
 class ServerHandler(http.server.SimpleHTTPRequestHandler):
     # Must be set class-wide from configuration files (read-only)
+    cache_file_path = None
     github_user = None
     db_file_path = None
     website_template = None
@@ -153,8 +155,8 @@ def main():
     )
 
     # Load config from file
-    config_file_path = os.path.abspath('github-pr-board.yaml')
-    config_file_example_path = os.path.abspath('github-pr-board.yaml.example')
+    config_file_path = os.path.abspath('workboard.yaml')
+    config_file_example_path = os.path.abspath('workboard.yaml.example')
     if not os.path.exists(config_file_path):
         raise RuntimeError(
             f'Please add a configuration file {config_file_path!r}. '
@@ -174,7 +176,7 @@ def main():
         return current
     ServerHandler.github_user = get_cfg_path('github', 'user')
 
-    ServerHandler.db_file_path = os.path.abspath('github-pr-board.db')
+    ServerHandler.db_file_path = os.path.abspath('workboard.db')
     if not os.path.exists(ServerHandler.db_file_path):
             raise RuntimeError(
                 f'Please create {ServerHandler.db_file_path!r} if this is the first time starting this '

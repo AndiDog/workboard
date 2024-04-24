@@ -4,7 +4,7 @@
 
 ```sh
 # One-time setup
-python3 -m venv .venv --prompt github-pr-board
+python3 -m venv .venv --prompt workboard
 .venv/bin/pip install -r requirements.txt
 
 # Run
