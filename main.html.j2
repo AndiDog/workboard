@@ -124,7 +124,7 @@
                 event.preventDefault();
             }
 
-            document.body.innerHTML = '<p>Reloading workboard. This may take a minute, or even fail in case of rate limit, if PR updates must be fetched from the GitHub API.</p><div class="lds-dual-ring"></div>';
+            document.body.innerHTML = '<p>Reloading workboard. This may take a minute, or even fail in case of rate limit, while PR updates are fetched from the GitHub API.</p><div class="lds-dual-ring"></div>';
 
             // Give the above a chance to render
             window.setTimeout(function() {
