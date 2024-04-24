@@ -376,7 +376,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         params = dict(parse_qsl(self.rfile.read(int(self.headers['Content-Length'])).decode('ascii')))
         if len(params['csrf_token']) != 100:
             raise RuntimeError('Invalid or expired CSRF token (could be an attack)')
-        if not self.cache.get(f'csrf.{params['csrf_token']}'):
+        if not self.cache.get(f'csrf.{params["csrf_token"]}'):
             raise RuntimeError('Invalid or expired CSRF token (could be an attack)')
         return params
 
