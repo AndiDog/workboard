@@ -52,7 +52,7 @@ PR_STATUS_SORT_ORDER = {
     str(PullRequestStatus.SNOOZED_UNTIL_MENTIONED): 5,
     str(PullRequestStatus.SNOOZED_UNTIL_TIME): 5,
     str(PullRequestStatus.SNOOZED_UNTIL_UPDATE): 5,
-    str(PullRequestStatus.UPDATED_AFTER_SNOOZE): 3,
+    str(PullRequestStatus.UPDATED_AFTER_SNOOZE): 1,
     str(PullRequestStatus.UNKNOWN): 4,
 }
 assert all(str(status) in PR_STATUS_SORT_ORDER for status in PullRequestStatus), \
