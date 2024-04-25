@@ -2,6 +2,7 @@
 import copy
 import datetime
 import doctest
+from enum import StrEnum
 import json
 import html
 import http.server
@@ -26,9 +27,9 @@ import yaml
 PORT = 16666
 
 
-class PullRequestStatus:
-    # Wnen adding new status values here, ensure amending all code that tries to handle every value (CSS classes,
-    # sorting of the rendered list, ...)
+class PullRequestStatus(StrEnum):
+    # When adding new status values here, ensure amending all code that tries to handle every value
+    # (e.g. CSS classes).
 
     CLOSED = 'closed'
     DELETED = 'deleted'
@@ -42,6 +43,20 @@ class PullRequestStatus:
     SNOOZED_UNTIL_UPDATE = 'snoozed-until-update'
     UPDATED_AFTER_SNOOZE = 'updated-after-snooze'
     UNKNOWN = 'unknown'
+
+PR_STATUS_SORT_ORDER = {
+    str(PullRequestStatus.CLOSED): 1,
+    str(PullRequestStatus.DELETED): 999,  # not applicable since we filter those out for rendering
+    str(PullRequestStatus.MERGED): 1,
+    str(PullRequestStatus.MUST_REVIEW): 2,
+    str(PullRequestStatus.SNOOZED_UNTIL_MENTIONED): 5,
+    str(PullRequestStatus.SNOOZED_UNTIL_TIME): 5,
+    str(PullRequestStatus.SNOOZED_UNTIL_UPDATE): 5,
+    str(PullRequestStatus.UPDATED_AFTER_SNOOZE): 3,
+    str(PullRequestStatus.UNKNOWN): 4,
+}
+assert all(str(status) in PR_STATUS_SORT_ORDER for status in PullRequestStatus), \
+    'All PullRequestStatus enum values must be represented in PR_STATUS_SORT_ORDER'
 
 
 def github_datetime_to_timestamp(s):
@@ -329,17 +344,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 ),
                 # PRs with latest changes are displayed on top, ordered by status.
                 key=lambda pr: (
-                    {
-                        PullRequestStatus.CLOSED: 1,
-                        PullRequestStatus.DELETED: 999,  # not applicable since we filtered those out
-                        PullRequestStatus.MERGED: 1,
-                        PullRequestStatus.MUST_REVIEW: 2,
-                        PullRequestStatus.SNOOZED_UNTIL_MENTIONED: 5,
-                        PullRequestStatus.SNOOZED_UNTIL_TIME: 5,
-                        PullRequestStatus.SNOOZED_UNTIL_UPDATE: 5,
-                        PullRequestStatus.UPDATED_AFTER_SNOOZE: 3,
-                        PullRequestStatus.UNKNOWN: 4,
-                    }[pr['workboard_fields']['status']],
+                    PR_STATUS_SORT_ORDER[pr['workboard_fields']['status']],
                     -github_datetime_to_timestamp(pr['github_fields']['updatedAt']),
                     -pr['workboard_fields'].get('last_change', 2**63),
                 ),
