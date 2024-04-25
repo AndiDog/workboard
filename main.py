@@ -340,6 +340,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                         PullRequestStatus.UPDATED_AFTER_SNOOZE: 3,
                         PullRequestStatus.UNKNOWN: 4,
                     }[pr['workboard_fields']['status']],
+                    -github_datetime_to_timestamp(pr['github_fields']['updatedAt']),
                     -pr['workboard_fields'].get('last_change', 2**63),
                 ),
             )
