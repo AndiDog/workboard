@@ -36,6 +36,10 @@ class PullRequestStatus(StrEnum):
     MERGED = 'merged'
     MUST_REVIEW = 'must-review'
 
+    # User reviewed/updated the PR, and either merged it or expects it to be merged. If that happens, it should
+    # be deleted from workboard storage. If not, it should pop up again (TODO this part isn't implemented yet).
+    REVIEWED_DELETE_ON_MERGE = 'reviewed-delete-on-merge'
+
     # Basically means that someone else takes care of the review. Only makes sense for PRs authored by others.
     SNOOZED_UNTIL_MENTIONED = 'snoozed-until-mentioned'
 
@@ -49,6 +53,7 @@ PR_STATUS_SORT_ORDER = {
     str(PullRequestStatus.DELETED): 999,  # not applicable since we filter those out for rendering
     str(PullRequestStatus.MERGED): 1,
     str(PullRequestStatus.MUST_REVIEW): 2,
+    str(PullRequestStatus.REVIEWED_DELETE_ON_MERGE): 5,
     str(PullRequestStatus.SNOOZED_UNTIL_MENTIONED): 5,
     str(PullRequestStatus.SNOOZED_UNTIL_TIME): 5,
     str(PullRequestStatus.SNOOZED_UNTIL_UPDATE): 5,
@@ -208,8 +213,22 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
         if (pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.MERGED)
                 and github_pr['state'].lower() == 'merged'
                 and github_pr['closed']):
-            pr['workboard_fields']['status'] = PullRequestStatus.MERGED
+            if pr['workboard_fields']['status'] == PullRequestStatus.REVIEWED_DELETE_ON_MERGE:
+                logging.info('Marking PR %r as deleted because it was merged', github_pr['url'])
+                pr['workboard_fields']['status'] = PullRequestStatus.DELETED
+                pr['workboard_fields']['last_change'] = time.time()
+                pr['workboard_fields']['delete_after'] = time.time() + 86400 * 30
+            else:
+                logging.info('Marking PR %r as merged', github_pr['url'])
+                pr['workboard_fields']['status'] = PullRequestStatus.MERGED
+                pr['workboard_fields']['last_change'] = time.time()
+
+        if (pr['workboard_fields']['status'] == PullRequestStatus.REVIEWED_DELETE_ON_MERGE
+                and pr['workboard_fields']['bring_back_to_review_if_not_merged_until'] <= time.time()):
+            logging.info('Passed the time until PR %r was meant to be merged, marking as must-review', github_pr['url'])
+            pr['workboard_fields']['status'] = PullRequestStatus.MUST_REVIEW
             pr['workboard_fields']['last_change'] = time.time()
+            del pr['workboard_fields']['bring_back_to_review_if_not_merged_until']
 
         if (pr['workboard_fields']['status'] not in (PullRequestStatus.DELETED, PullRequestStatus.CLOSED)
                 and github_pr['state'].lower() == 'closed'
@@ -456,6 +475,29 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                 pr = pull_requests[pr_url]
                 pr['workboard_fields']['status'] = PullRequestStatus.MUST_REVIEW
                 pr['workboard_fields']['last_change'] = time.time()
+                self._validate_pull_requests(pull_requests)
+                self.db.set('pull_requests', pull_requests)
+                self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)
+
+            # Back to homepage (full reload - yes this is a very simple web app!)
+            self.send_response(303)
+            self.send_header('Location', '/')
+            self.end_headers()
+        elif self.path == '/pr/reviewed-delete-on-merge':
+            params = self._get_protected_post_params()
+
+            pr_url = params['pr_url']
+            if not isinstance(pr_url, str) or len(pr_url) > 300:
+                raise ValueError('Invalid pr_url')
+
+            logging.info('Marking PR %r as reviewed-delete-on-merge', pr_url)
+
+            with self.db.transact():
+                pull_requests = self.db['pull_requests']
+                pr = pull_requests[pr_url]
+                pr['workboard_fields']['status'] = PullRequestStatus.REVIEWED_DELETE_ON_MERGE
+                pr['workboard_fields']['last_change'] = time.time()
+                pr['workboard_fields']['bring_back_to_review_if_not_merged_until'] = time.time() + 3600 * 4
                 self._validate_pull_requests(pull_requests)
                 self.db.set('pull_requests', pull_requests)
                 self.db.set('last-clicked-github-pr-url', pr_url, expire=3600 * 4)

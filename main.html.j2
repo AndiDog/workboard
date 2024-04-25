@@ -65,11 +65,11 @@
             background-color: #f7f200dd;
         }
 
-        tr.status-snoozed-until-mentioned, tr.status-snoozed-until-time, tr.status-snoozed-until-update {
+        tr.status-reviewed-delete-on-merge, tr.status-snoozed-until-mentioned, tr.status-snoozed-until-time, tr.status-snoozed-until-update {
             opacity: 0.55;
         }
 
-        td.status-snoozed-until-mentioned, td.status-snoozed-until-time, td.status-snoozed-until-update {
+        td.status-reviewed-delete-on-merge, td.status-snoozed-until-mentioned, td.status-snoozed-until-time, td.status-snoozed-until-update {
             background-color: #dddddddd;
             color: #999;
         }
@@ -86,6 +86,11 @@
         .action-delete {
             font-weight: bold;
             color: #f20;
+        }
+
+        .action-reviewed-delete-on-merge {
+            font-weight: bold;
+            color: #09b134;
         }
 
         /* CSS-only spinner from https://loading.io/css/ */
@@ -217,6 +222,17 @@
 
                             <button type="submit">
                                 Mark 'must review'
+                            </button>
+                        </form>
+                    {% endif %}
+
+                    {% if pr.github_fields.state|lower not in ('closed', 'merged') and pr.workboard_fields.status not in ('closed', 'merged', 'reviewed-delete-on-merge') %}
+                        <form action="/pr/reviewed-delete-on-merge" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                            <input type="hidden" name="pr_url" value="{{ pr.github_fields.url }}" />
+
+                            <button type="submit" class="action-reviewed-delete-on-merge">
+                                I reviewed or merged; delete once merged
                             </button>
                         </form>
                     {% endif %}
