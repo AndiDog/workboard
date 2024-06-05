@@ -195,6 +195,7 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
             if (pr['workboard_fields']['status'] == PullRequestStatus.DELETED
                     and pr['workboard_fields']['delete_after'] <= time.time()):
                 logging.info('Deleting PR %r from database', github_pr['url'])
+                del pull_requests[github_pr['url']]
 
             self._validate_pull_requests(pull_requests)
             self.db.set('pull_requests', pull_requests)
