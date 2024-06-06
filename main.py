@@ -77,6 +77,19 @@ def github_datetime_to_timestamp(s):
     return int(datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp())
 
 
+def timed(desc, callback):
+    begin = time.perf_counter()
+    try:
+        ret = callback()
+    except:
+        end = time.perf_counter()
+        logging.error('%r raised an exception after %.2f second(s)', desc, end - begin)
+        raise
+    end = time.perf_counter()
+    logging.info('%r took %.2f second(s)', desc, end - begin)
+    return ret
+
+
 class ServerHandler(http.server.SimpleHTTPRequestHandler):
     # Must be set class-wide from configuration files (read-only)
     cache = None
@@ -277,71 +290,62 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
 
             pr_search_json_fields_arg = 'author,repository,state,updatedAt,url,title'
 
-            # Own PRs
-            for github_pr in self._cached_subprocess_check_output(
-                cache_key=f'subprocess.prs.own.{self.github_user}.{pr_search_json_fields_arg}',
-                cache_duration_seconds=600,
-                mutate_before_store_in_cache=lambda v: json.loads(v),
-                subprocess_kwargs=dict(
-                    args=[
-                    'gh',
-                    'search', 'prs',
-                    '--author', self.github_user,
-                    '--state', 'open',
-                    '--json', pr_search_json_fields_arg
-                ],
-                encoding='utf-8',
+            for desc, cache_key, subprocess_kwargs in (
+                (
+                    'Own PRs',
+                    f'subprocess.prs.own.{self.github_user}.{pr_search_json_fields_arg}',
+                    dict(
+                        args=[
+                            'gh',
+                            'search', 'prs',
+                            '--author', self.github_user,
+                            '--state', 'open',
+                            '--json', pr_search_json_fields_arg
+                        ],
+                        encoding='utf-8',
+                    ),
+                ),
+                (
+                    'Assigned PRs',
+                    f'subprocess.prs.assigned.{self.github_user}.{pr_search_json_fields_arg}',
+                    dict(
+                        args=[
+                            'gh',
+                            'search', 'prs',
+                            '--assignee', self.github_user,
+                            '--state', 'open',
+                            '--json', pr_search_json_fields_arg
+                        ],
+                        encoding='utf-8',
+                    ),
+                ),
+                (
+                    'Review requested PRs',
+                    f'subprocess.prs.review-requested.{self.github_user}.{pr_search_json_fields_arg}',
+                    dict(
+                        args=[
+                            'gh',
+                            'search', 'prs',
+                            '--review-requested', self.github_user,
+                            '--state', 'open',
+                            '--json', pr_search_json_fields_arg
+                        ],
+                        encoding='utf-8',
+                    ),
+                ),
                 ),
             ):
-                if github_pr['url'] in already_updated_github_pr_urls:
-                    continue
-                github_pr = self._fetch_remaining_github_pr_fields(github_pr)
-                self._update_db_from_github_pr(github_pr)
-                already_updated_github_pr_urls.add(github_pr['url'])
-
-            # Assigned PRs
-            for github_pr in self._cached_subprocess_check_output(
-                cache_key=f'subprocess.prs.assigned.{self.github_user}.{pr_search_json_fields_arg}',
-                cache_duration_seconds=600,
-                mutate_before_store_in_cache=lambda v: json.loads(v),
-                subprocess_kwargs=dict(
-                    args=[
-                    'gh',
-                    'search', 'prs',
-                    '--assignee', self.github_user,
-                    '--state', 'open',
-                    '--json', pr_search_json_fields_arg
-                ],
-                encoding='utf-8',
-                ),
-            ):
-                if github_pr['url'] in already_updated_github_pr_urls:
-                    continue
-                github_pr = self._fetch_remaining_github_pr_fields(github_pr)
-                self._update_db_from_github_pr(github_pr)
-                already_updated_github_pr_urls.add(github_pr['url'])
-
-            # Review requested PRs
-            for github_pr in self._cached_subprocess_check_output(
-                cache_key=f'subprocess.prs.review-requested.{self.github_user}.{pr_search_json_fields_arg}',
-                cache_duration_seconds=600,
-                mutate_before_store_in_cache=lambda v: json.loads(v),
-                subprocess_kwargs=dict(
-                    args=[
-                    'gh',
-                    'search', 'prs',
-                    '--review-requested', self.github_user,
-                    '--state', 'open',
-                    '--json', pr_search_json_fields_arg
-                ],
-                encoding='utf-8',
-                ),
-            ):
-                if github_pr['url'] in already_updated_github_pr_urls:
-                    continue
-                github_pr = self._fetch_remaining_github_pr_fields(github_pr)
-                self._update_db_from_github_pr(github_pr)
-                already_updated_github_pr_urls.add(github_pr['url'])
+                for github_pr in timed(desc, lambda: self._cached_subprocess_check_output(
+                    cache_key=cache_key,
+                    cache_duration_seconds=600,
+                    mutate_before_store_in_cache=lambda v: json.loads(v),
+                    subprocess_kwargs=subprocess_kwargs,
+                )):
+                    if github_pr['url'] in already_updated_github_pr_urls:
+                        continue
+                    github_pr = self._fetch_remaining_github_pr_fields(github_pr)
+                    self._update_db_from_github_pr(github_pr)
+                    already_updated_github_pr_urls.add(github_pr['url'])
 
             pull_requests_from_db = self.db.get('pull_requests', {})
             missing_github_pr_urls = set(pull_requests_from_db.keys()) - already_updated_github_pr_urls
