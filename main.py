@@ -333,6 +333,19 @@ class ServerHandler(http.server.SimpleHTTPRequestHandler):
                         encoding='utf-8',
                     ),
                 ),
+                (
+                    'Reviewed by me PRs',
+                    f'subprocess.prs.reviewed-by-me.{self.github_user}.{pr_search_json_fields_arg}',
+                    dict(
+                        args=[
+                            'gh',
+                            'search', 'prs',
+                            '--reviewed-by', self.github_user,
+                            '--state', 'open',
+                            '--json', pr_search_json_fields_arg
+                        ],
+                        encoding='utf-8',
+                    ),
                 ),
             ):
                 for github_pr in timed(desc, lambda: self._cached_subprocess_check_output(
