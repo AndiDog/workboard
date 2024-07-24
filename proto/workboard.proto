@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package workboard;
+option go_package = "andidog.de/workboard/proto";
+
+message CommandResponse {}
+
+message MarkReviewedCommand {}
+
+service Workboard {
+  rpc MarkReviewed(MarkReviewedCommand) returns (CommandResponse) {}
+}
