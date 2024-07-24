@@ -35,16 +35,26 @@ That said, [I](https://github.com/AndiDog) am making this application **open sou
 
 ## Development
 
+### Server
+
 ```sh
 # Once
 brew install protoc-gen-go protoc-gen-go-grpc
 
 # Server
 make server-watch
+```
 
-# Client
-LOGLEVEL=debug ./watch
-open "http://localhost:16666/" # best pin this tab in your browser
+### Client
+
+```sh
+cd client
+
+# Once
+brew install protoc-gen-grpc-web # macOS (else get it from https://github.com/grpc/grpc-web)
+npm install
+
+npm run dev
 ```
 
 ## Possible future features
