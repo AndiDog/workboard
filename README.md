@@ -47,6 +47,8 @@ make server-watch
 
 ### Client
 
+Ensure your browser trusts the CA certificate (`test-pki/ca/ca.crt`).
+
 ```sh
 cd client
 
@@ -54,7 +56,7 @@ cd client
 brew install protoc-gen-grpc-web # macOS (else get it from https://github.com/grpc/grpc-web)
 npm install
 
-npm run dev
+make client-watch
 ```
 
 ## Possible future features

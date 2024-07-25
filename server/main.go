@@ -1,16 +1,20 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"andidog.de/workboard/server/api"
 	"andidog.de/workboard/server/proto"
+	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 )
@@ -25,7 +29,7 @@ func main() {
 		log.Fatalf("Error loading env files (%v)", envFiles)
 	}
 
-	// gRPC setup
+	// gRPC setup (TODO: only keep gRPC-Web)
 	grpcListenAddress := os.Getenv("GRPC_LISTEN_STRING")
 	if grpcListenAddress == "" {
 		log.Fatal("Missing GRPC_LISTEN_STRING environment variable")
@@ -41,6 +45,27 @@ func main() {
 		log.Fatalf("Failed to start: %v", err)
 	}
 	proto.RegisterWorkboardServer(grpcServer, workboardServer)
+
+	gprcWebAllowedCorsOrigin := os.Getenv("GPRC_WEB_ALLOWED_CORS_ORIGIN")
+	if gprcWebAllowedCorsOrigin == "" {
+		log.Fatal("Missing GPRC_WEB_ALLOWED_CORS_ORIGIN environment variable")
+	}
+	wrappedGrpcServer := grpcweb.WrapServer(grpcServer,
+		grpcweb.WithCorsForRegisteredEndpointsOnly(false),
+		grpcweb.WithOriginFunc(func(origin string) bool { return origin == gprcWebAllowedCorsOrigin }))
+	handler := func(resp http.ResponseWriter, req *http.Request) {
+		wrappedGrpcServer.ServeHTTP(resp, req)
+	}
+	grpcWebListenAddress := os.Getenv("GRPC_WEB_LISTEN_STRING")
+	if grpcWebListenAddress == "" {
+		log.Fatal("Missing GRPC_WEB_LISTEN_STRING environment variable")
+	}
+	http2Server := http.Server{
+		Addr:              grpcWebListenAddress,
+		Handler:           http.HandlerFunc(handler),
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       30 * time.Second,
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
@@ -58,11 +83,34 @@ func main() {
 		log.Printf("gRPC server successfully shut down")
 	}()
 
+	// Start gRPC-Web server
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		tlsCertFilePath := "../test-pki/localhost.crt"
+		tlsKeyFilePath := "../test-pki/localhost.key"
+
+		log.Printf("Starting gRPC-Web server on %s", http2Server.Addr)
+
+		if err := http2Server.ListenAndServeTLS(tlsCertFilePath, tlsKeyFilePath); err != nil {
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("Failed to start HTTP2 server: %s", err)
+			}
+		}
+		log.Printf("gRPC-Web server successfully shut down")
+	}()
+
 	<-quit
 	log.Print("Got shutdown signal")
 
 	log.Print("Shutting down gRPC server")
 	grpcServer.GracefulStop()
+	log.Print("Shutting down gRPC-Web server")
+	err = http2Server.Shutdown(context.Background())
+	if err != nil {
+		log.Printf("Failed to shut down gRPC-Web server: %s", err)
+	}
 
 	wg.Wait()
 	log.Println("Servers stopped, quitting")

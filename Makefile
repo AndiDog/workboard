@@ -1,3 +1,7 @@
+.PHONY: client-watch
+client-watch:
+	cd client && npm run dev
+
 .PHONY: generate-server
 generate-server: proto/workboard.proto server/proto/gen.go
 	cd server && go generate ./...
