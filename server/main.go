@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"andidog.de/workboard/server/api"
+	"andidog.de/workboard/server/database"
 	"andidog.de/workboard/server/proto"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/joho/godotenv"
@@ -29,6 +30,22 @@ func main() {
 		log.Fatalf("Error loading env files (%v)", envFiles)
 	}
 
+	// Database
+	databaseDir := os.Getenv("DATABASE_DIR")
+	if databaseDir == "" {
+		log.Fatal("Missing DATABASE_DIR environment variable")
+	}
+	db, err := database.OpenDatabase(databaseDir)
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			log.Printf("Failed to close database %q: %s", databaseDir, err)
+		}
+	}()
+	if err != nil {
+		log.Fatalf("Failed to open database %q: %s", databaseDir, err)
+	}
+
 	// gRPC setup (TODO: only keep gRPC-Web)
 	grpcListenAddress := os.Getenv("GRPC_LISTEN_STRING")
 	if grpcListenAddress == "" {
@@ -40,7 +57,7 @@ func main() {
 	}
 	var opts []grpc.ServerOption
 	grpcServer := grpc.NewServer(opts...)
-	workboardServer, err := api.NewWorkboardServer()
+	workboardServer, err := api.NewWorkboardServer(db)
 	if err != nil {
 		log.Fatalf("Failed to start: %v", err)
 	}

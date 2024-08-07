@@ -3,10 +3,37 @@ syntax = "proto3";
 package workboard;
 option go_package = "andidog.de/workboard/proto";
 
+// MESSAGES
+
+// Pull/merge request on a platform like GitHub
+message CodeReview {
+  // Unique ID, e.g. GitHub URL. No assumptions can be made on the value format
+  // - if the GitHub URL is needed, look into `github_fields`.
+  string id = 1;
+
+  GitHubPullRequestFields github_fields = 2;
+}
+
+message GitHubPullRequestFields {
+  string url = 1;
+}
+
+// QUERIES
+
+message GetCodeReviewsQuery {}
+
+message GetCodeReviewsResponse {
+  repeated CodeReview code_reviews = 1;
+}
+
+// COMMANDS
+
 message CommandResponse {}
 
 message MarkReviewedCommand {}
 
 service Workboard {
+  rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
+
   rpc MarkReviewed(MarkReviewedCommand) returns (CommandResponse) {}
 }
