@@ -21,5 +21,6 @@ export default defineConfig({
         "; img-src 'self'" +
         '; font-src https://fonts.gstatic.com',
     },
+    port: 5174, // another of my projects already uses 5173 for local development
   },
 });
