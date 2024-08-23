@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-github/v63/github"
 	"github.com/pkg/errors"
+	"github.com/xeonx/timeago"
 	"go.uber.org/zap"
 
 	"andidog.de/workboard/server/database"
@@ -39,14 +40,46 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, existingCodeReviews map[string]*proto.CodeReview) (string, *proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string) (string, *proto.CodeReview, error) {
 	id := *issue.HTMLURL // PR URL doesn't change and is unique, so use it as ID
+
+	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
+	switch *issue.State {
+	case "open":
+		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_OPEN
+	case "closed":
+		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_CLOSED
+	}
+	if issue.PullRequestLinks.MergedAt != nil {
+		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED
+	}
+
+	lastUpdatedDescription := ""
+	var updatedAtTimestamp int64 = 0
+	if issue.UpdatedAt != nil {
+		lastUpdatedDescription = timeago.NoMax(timeago.English).Format(issue.UpdatedAt.Time)
+		updatedAtTimestamp = issue.UpdatedAt.Time.Unix()
+	}
 
 	codeReview := &proto.CodeReview{
 		Id:     id,
 		Status: proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
 		GithubFields: &proto.GitHubPullRequestFields{
-			Url: *issue.HTMLURL,
+			Url:   *issue.HTMLURL,
+			Title: *issue.Title,
+			Repo: &proto.GitHubRepo{
+				Name:             "reponame-TODO",
+				OrganizationName: "orgname-TODO",
+				// These aren't filled (TODO)
+				// Name:             *issue.Repository.Name,
+				// OrganizationName: *issue.Repository.Organization.Name,
+			},
+			Status:             gitHubPullRequestStatus,
+			UpdatedAtTimestamp: updatedAtTimestamp,
+		},
+		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
+			AuthorIsSelf:           issue.User != nil && issue.User.Name != nil && *issue.User.Name == gitHubUserSelf,
+			LastUpdatedDescription: lastUpdatedDescription,
 		},
 	}
 	if existingCodeReview, ok := existingCodeReviews[id]; ok {
@@ -129,7 +162,7 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 	}
 
 	for _, issue := range res.Issues {
-		id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, codeReviews)
+		id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, codeReviews, gitHubUser)
 		if err != nil {
 			return nil, err
 		}

@@ -1,25 +1,149 @@
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+body {
+  font-family: 'Open Sans', Arial, sans-serif;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.preact:hover {
-  filter: drop-shadow(0 0 2em #673ab8aa);
+table {
+  padding: 0;
+  border-collapse: collapse;
+  border: none;
 }
 
-.card {
-  padding: 2em;
+table.pull-requests {
+  width: 100%;
 }
 
-.read-the-docs {
-  color: #888;
+table.pull-requests tr {
+  border-bottom: 1px solid #aaa;
+}
+
+table.pull-requests tr.last-clicked {
+  background-color: #66ddf9;
+}
+
+td,
+th {
+  padding: 0.25rem 0.75rem;
+}
+
+th {
+  background-color: #eee;
+  font-weight: bold;
+  text-align: left;
+}
+
+.pr-link,
+.pr-link:visited {
+  color: #500;
+  font-weight: 600;
+  text-decoration: none;
+}
+.pr-link:hover {
+  color: #f30;
+  text-decoration: underline;
+}
+
+.repo-name {
+  font-family: 'DejaVu Sans Mono', monospace;
+}
+
+td.status-closed {
+  background-color: #d53d26dd;
+}
+
+td.status-merged {
+  background-color: #ccffccdd;
+}
+
+td.status-must-review {
+  background-color: #f7f200dd;
+}
+
+tr.status-reviewed-delete-on-merge,
+tr.status-snoozed-until-mentioned,
+tr.status-snoozed-until-time,
+tr.status-snoozed-until-update {
+  opacity: 0.55;
+}
+
+td.status-reviewed-delete-on-merge,
+td.status-snoozed-until-mentioned,
+td.status-snoozed-until-time,
+td.status-snoozed-until-update {
+  background-color: #dddddddd;
+  color: #999;
+}
+
+td.status-unknown {
+  background-color: #f2f2f2dd; /* PR not known yet */
+}
+
+td.status-updated-after-snooze {
+  background-color: #ccffccdd;
+  font-weight: bold;
+}
+
+.actions {
+  /* Align buttons */
+  display: flex;
+
+  margin-top: 0.5em;
+}
+
+.actions button {
+  margin-right: 0.75em;
+  border: 1px solid #ccc;
+  background-color: #f6f6f6;
+  border-radius: 0.3em;
+  padding: 0.3em 0.8em;
+  color: #444;
+}
+.actions button:hover {
+  background-color: #ccc;
+  border: 1px solid #333;
+  color: black;
+}
+.actions button:focus {
+  background-color: #c0c0c0;
+  border: 1px solid #222;
+  color: black;
+}
+
+.action-delete {
+  font-weight: bold;
+  color: #f20 !important;
+}
+
+.action-reviewed-delete-on-merge {
+  font-weight: bold;
+  color: #09b134 !important;
+}
+
+/* CSS-only spinner from https://loading.io/css/ */
+.lds-dual-ring,
+.lds-dual-ring:after {
+  box-sizing: border-box;
+}
+.lds-dual-ring {
+  display: inline-block;
+  width: 80px;
+  height: 80px;
+}
+.lds-dual-ring:after {
+  content: ' ';
+  display: block;
+  width: 64px;
+  height: 64px;
+  margin: 8px;
+  border-radius: 50%;
+  border: 6.4px solid currentColor;
+  border-color: currentColor transparent currentColor transparent;
+  animation: lds-dual-ring 1.2s linear infinite;
+}
+@keyframes lds-dual-ring {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }

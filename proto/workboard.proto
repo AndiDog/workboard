@@ -5,6 +5,17 @@ option go_package = "andidog.de/workboard/proto";
 
 // MESSAGES
 
+message CodeReviewRenderOnlyFields {
+  // These fields depend on configuration and don't represent the code review
+  // itself. For example, `author_is_self` depends for which user the code
+  // reviews are listed.
+  bool author_is_self = 1;
+
+  string last_updated_description = 2;
+
+  bool recently_touched_by_user = 3;
+}
+
 // Pull/merge request on a platform like GitHub
 message CodeReview {
   // Unique ID, e.g. GitHub URL. No assumptions can be made on the value format
@@ -14,16 +25,47 @@ message CodeReview {
   CodeReviewStatus status = 3;
 
   GitHubPullRequestFields github_fields = 2;
+
+  CodeReviewRenderOnlyFields render_only_fields = 4;
 }
 
 enum CodeReviewStatus {
   CODE_REVIEW_STATUS_UNSPECIFIED = 0;
   CODE_REVIEW_STATUS_NEW = 1;
   CODE_REVIEW_STATUS_MERGED = 2;
+  CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME = 3;
+  CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE = 4;
+  CODE_REVIEW_STATUS_MUST_REVIEW = 5;
+  CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE = 6;
+  CODE_REVIEW_STATUS_CLOSED = 7;
+  CODE_REVIEW_STATUS_REVIEWED_DELETED = 8;
+  CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE = 9;
+  CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED = 10;
+  CODE_REVIEW_STATUS_DELETED = 11;
+}
+
+enum GitHubPullRequestStatus {
+  GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED = 0;
+  GITHUB_PULL_REQUEST_STATUS_OPEN = 1;
+  GITHUB_PULL_REQUEST_STATUS_CLOSED = 2;
+  GITHUB_PULL_REQUEST_STATUS_MERGED = 3;
 }
 
 message GitHubPullRequestFields {
   string url = 1;
+  string title = 4;
+
+  GitHubRepo repo = 2;
+
+  GitHubPullRequestStatus status = 3;
+
+  int64 updated_at_timestamp = 5;
+}
+
+message GitHubRepo {
+  string organization_name = 1;
+
+  string name = 2;
 }
 
 // QUERIES
