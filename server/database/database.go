@@ -40,6 +40,9 @@ func (db *Database) Close() error {
 // If the key was found, true is returned. The caller should therefore initialize
 // `value` with a reasonable default or check the return values with
 // `ok, err := db.Get(...)`.
+//
+// Do not accidentally pass a value (wrong: `var s string; db.Get("mykey", s)`) since
+// that can lead to an infinite call.
 func (db *Database) Get(key string, value any) (bool, error) {
 	dbValue, err := db.roseDB.Get([]byte(key))
 	if err != nil {

@@ -40,6 +40,7 @@ That said, [I](https://github.com/AndiDog) am making this application **open sou
 ```sh
 # Once
 brew install protoc-gen-go protoc-gen-go-grpc
+echo 'TEST_GITHUB_USER=FILL_IN_YOUR_USERNAME` > server/.env-local
 
 # Server
 make server-watch
@@ -47,7 +48,7 @@ make server-watch
 
 ### Client
 
-Ensure your browser trusts the CA certificate (`test-pki/ca/ca.crt`).
+Ensure your browser trusts the CA certificate (`test-pki/ca/ca.crt`) or else you'll get errors (gRPC request fails in browser, server logs something like `http: TLS handshake error from 127.0.0.1:57598: remote error: tls: unknown certificate authority`).
 
 ```sh
 cd client

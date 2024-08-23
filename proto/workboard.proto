@@ -11,7 +11,15 @@ message CodeReview {
   // - if the GitHub URL is needed, look into `github_fields`.
   string id = 1;
 
+  CodeReviewStatus status = 3;
+
   GitHubPullRequestFields github_fields = 2;
+}
+
+enum CodeReviewStatus {
+  CODE_REVIEW_STATUS_UNSPECIFIED = 0;
+  CODE_REVIEW_STATUS_NEW = 1;
+  CODE_REVIEW_STATUS_MERGED = 2;
 }
 
 message GitHubPullRequestFields {

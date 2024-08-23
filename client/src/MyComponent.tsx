@@ -1,7 +1,6 @@
 import { Component } from 'preact';
 import {
   WorkboardClient,
-  MarkReviewedCommand,
   GetCodeReviewsQuery,
   GetCodeReviewsResponse,
 } from './generated/workboard';
@@ -40,6 +39,7 @@ export default class MyComponent extends Component<{}, MyComponentState> {
                     <>
                       <br />
                       <a href={codeReview.githubFields.url}>GitHub PR</a>
+                      (status: {codeReview.status})
                     </>
                   )}
                 </li>

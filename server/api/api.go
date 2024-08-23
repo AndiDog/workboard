@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
+	"github.com/google/go-github/v63/github"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	"andidog.de/workboard/server/database"
 	"andidog.de/workboard/server/proto"
@@ -14,15 +17,19 @@ import (
 type WorkboardServer struct {
 	proto.UnimplementedWorkboardServer
 
-	db *database.Database
+	db     *database.Database
+	logger *zap.SugaredLogger
+
+	gitHubClient *github.Client
 }
 
-func NewWorkboardServer(db *database.Database) (*WorkboardServer, error) {
+func NewWorkboardServer(db *database.Database, logger *zap.SugaredLogger) (*WorkboardServer, error) {
 	if db == nil {
 		return nil, errors.New("db must not be nil")
 	}
 	return &WorkboardServer{
-		db: db,
+		db:     db,
+		logger: logger,
 	}, nil
 }
 
@@ -30,38 +37,125 @@ type PR struct {
 	GitHubURL string `json:"githubUrl"`
 }
 
-func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCodeReviewsQuery) (*proto.GetCodeReviewsResponse, error) {
-	log.Printf("GetCodeReviews")
+// convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
+// already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, existingCodeReviews map[string]*proto.CodeReview) (string, *proto.CodeReview, error) {
+	id := *issue.HTMLURL // PR URL doesn't change and is unique, so use it as ID
 
-	codeReviews := map[string]proto.CodeReview{}
+	codeReview := &proto.CodeReview{
+		Id:     id,
+		Status: proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
+		GithubFields: &proto.GitHubPullRequestFields{
+			Url: *issue.HTMLURL,
+		},
+	}
+	if existingCodeReview, ok := existingCodeReviews[id]; ok {
+		if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_UNSPECIFIED {
+			codeReview.Status = existingCodeReview.Status
+		}
+	}
+
+	return id, codeReview, nil
+}
+
+func (s *WorkboardServer) ensureGitHubClient() *github.Client {
+	if s.gitHubClient == nil {
+		s.gitHubClient = github.NewClient(nil)
+	}
+	return s.gitHubClient
+}
+
+func (s *WorkboardServer) getGitHubUser() (string, error) {
+	logger := s.logger
+	logger.Debug("Reading GitHub user from database")
+
+	var gitHubUser string
+	ok, err := s.db.Get("github_user", &gitHubUser)
+	if err != nil {
+		logger.Errorw("Failed to read GitHub user from database", "err", err)
+		return "", err
+	}
+	if !ok {
+		gitHubUser := os.Getenv("TEST_GITHUB_USER")
+		if gitHubUser != "" {
+			err = s.db.Set("github_user", gitHubUser)
+			if err != nil {
+				logger.Errorw("Failed to write test GitHub user into database", "err", err)
+				return "", err
+			}
+		} else {
+			return "", errors.New("GitHub user not configured")
+		}
+	}
+	logger.Debugw("Found GitHub user in database", "gitHubUser", gitHubUser)
+	return gitHubUser, nil
+}
+
+func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*proto.CodeReview, error) {
+	logger := s.logger
+
+	codeReviews := map[string]*proto.CodeReview{}
 	ok, err := s.db.Get("code_reviews", &codeReviews)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("code_reviews ok=%v code_reviews=%+v\n", ok, codeReviews)
-
-	// Simulated values for now
-	codeReviews["myid"] = proto.CodeReview{
-		Id: "myid",
-		GithubFields: &proto.GitHubPullRequestFields{
-			Url: "https://bla",
-		},
+	if !ok {
+		logger.Debug("No code reviews stored in database yet")
 	}
-	err = s.db.Set("code_reviews", &codeReviews)
+
+	gitHubUser, err := s.getGitHubUser()
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("code_reviews value set fine\n")
+	logger = logger.With("gitHubUser", gitHubUser)
 
-	codeReviews = map[string]proto.CodeReview{}
-	_, err = s.db.Get("code_reviews", &codeReviews)
+	client := s.ensureGitHubClient()
+	query := fmt.Sprintf(`author:"%s" is:pr is:open`, gitHubUser)
+	logger = logger.With("query", query)
+	logger.Debug("Querying GitHub PRs")
+	res, _, err := client.Search.Issues(ctx, query, &github.SearchOptions{
+		// Not needed, but make things idempotent
+		Sort:  "created",
+		Order: "desc",
+		ListOptions: github.ListOptions{
+			// TODO paging
+			Page:    1,
+			PerPage: 100,
+		},
+	})
+	logger.Debug("Queried GitHub PRs")
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get code reviews from database")
+		return nil, errors.Wrapf(err, "failed to search GitHub PRs for user %q", gitHubUser)
+	}
+
+	for _, issue := range res.Issues {
+		id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, codeReviews)
+		if err != nil {
+			return nil, err
+		}
+		codeReviews[id] = codeReview
+	}
+
+	err = s.db.Set("code_reviews", &codeReviews)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to store code reviews in database")
+	}
+
+	return codeReviews, nil
+}
+
+func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCodeReviewsQuery) (*proto.GetCodeReviewsResponse, error) {
+	logger := s.logger
+	logger.Info("GetCodeReviews")
+
+	codeReviews, err := s.refreshCodeReviews(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	res := &proto.GetCodeReviewsResponse{}
 	for _, codeReview := range codeReviews {
-		res.CodeReviews = append(res.CodeReviews, &codeReview)
+		res.CodeReviews = append(res.CodeReviews, codeReview)
 	}
 	return res, nil
 }
