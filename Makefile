@@ -22,5 +22,5 @@ server-lint:
 server-watch: generate-server server-lint
 	cd server && ( \
 		find . -name go.mod -o -name go.sum -o -name "*.go" \
-			| entr -r sh -c '~/bin/cmd_k && go run main.go' \
+			| entr -ccr sh -c 'go run main.go' \
 	)
