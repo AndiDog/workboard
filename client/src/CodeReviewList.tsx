@@ -8,9 +8,12 @@ import {
   SnoozeUntilUpdateCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
+import Spinner from './Spinner';
 
 type CodeReviewListState = {
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
+
+  codeReviewIdsWithActiveCommands: Set<string>;
 };
 
 function codeReviewStatusToString(status: CodeReviewStatus): string {
@@ -65,6 +68,14 @@ function sortCodeReviews(res: GetCodeReviewsResponse) {
 }
 
 export default class CodeReviewList extends Component<{}, CodeReviewListState> {
+  constructor(props: {}) {
+    super(props);
+
+    this.state = {
+      codeReviewIdsWithActiveCommands: new Set(),
+    };
+  }
+
   componentDidMount() {
     this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
       let client = new WorkboardClient('https://localhost:16667');
@@ -84,28 +95,37 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   onSnoozeUntilUpdate(event: Event, codeReviewId: string) {
     event.preventDefault();
 
-    let client = new WorkboardClient('https://localhost:16667');
-
     const thiz = this;
-    client.SnoozeUntilUpdate(
-      new SnoozeUntilUpdateCommand({ codeReviewId }),
-      null,
-      (error, res) => {
-        const commandResult = toGrpcResult(error, res);
-        if (!commandResult.ok) {
-          console.error(
-            `Failed to snooze until update: ${commandResult.error}`,
-          );
-          return;
-        }
+    this.setState(
+      {
+        codeReviewIdsWithActiveCommands: new Set([
+          ...this.state.codeReviewIdsWithActiveCommands,
+          codeReviewId,
+        ]),
+      },
+      () => {
+        let client = new WorkboardClient('https://localhost:16667');
 
-        thiz.refetchCodeReview(codeReviewId);
+        client.SnoozeUntilUpdate(
+          new SnoozeUntilUpdateCommand({ codeReviewId }),
+          null,
+          (error, res) => {
+            const commandResult = toGrpcResult(error, res);
+            if (!commandResult.ok) {
+              console.error(
+                `Failed to snooze until update: ${commandResult.error}`,
+              );
+            }
+
+            thiz.refetchCodeReview(codeReviewId);
+          },
+        );
       },
     );
   }
 
   // TODO: Only re-fetch single code review, not all. Delete from state if the code review is gone from database.
-  refetchCodeReview(_codeReviewId: string) {
+  refetchCodeReview(codeReviewId: string) {
     let client = new WorkboardClient('https://localhost:16667');
 
     const thiz = this;
@@ -113,8 +133,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       if (res !== null) {
         sortCodeReviews(res);
       }
+
+      const newCodeReviewIdsWithActiveCommands = new Set(
+        this.state.codeReviewIdsWithActiveCommands,
+      );
+      newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
       thiz.setState({
         codeReviewsGrpcResult: toGrpcResult(error, res),
+        codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
       });
     });
   }
@@ -221,6 +247,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           Snooze until I'm mentioned (= someone else reviews)
                         </button>
                       )}
+
+                      {this.state.codeReviewIdsWithActiveCommands.has(
+                        codeReview.id,
+                      ) && <Spinner />}
                     </div>
                   </td>
                   <td>{codeReview.renderOnlyFields.lastUpdatedDescription}</td>
