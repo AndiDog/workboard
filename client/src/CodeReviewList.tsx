@@ -6,11 +6,11 @@ import {
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 
-type MyComponentState = {
+type CodeReviewListState = {
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
 };
 
-export default class MyComponent extends Component<{}, MyComponentState> {
+export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   componentDidMount() {
     this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
       let client = new WorkboardClient('https://localhost:16667');
@@ -27,7 +27,7 @@ export default class MyComponent extends Component<{}, MyComponentState> {
   render() {
     return (
       <>
-        <h2>MyComponent</h2>
+        <h2>CodeReviewList</h2>
         <ul>
           {this.state.codeReviewsGrpcResult?.ok &&
             this.state.codeReviewsGrpcResult.res.codeReviews.map(
