@@ -27,6 +27,11 @@ message CodeReview {
   GitHubPullRequestFields github_fields = 2;
 
   CodeReviewRenderOnlyFields render_only_fields = 4;
+
+  int64 last_changed_timestamp = 5;
+
+  // These are only used in case of certain `status` value
+  int64 snooze_until_updated_at_changed_from = 6;
 }
 
 enum CodeReviewStatus {
@@ -54,6 +59,7 @@ enum GitHubPullRequestStatus {
 message GitHubPullRequestFields {
   string url = 1;
   string title = 4;
+  int64 number = 6;
 
   GitHubRepo repo = 2;
 
@@ -82,8 +88,14 @@ message CommandResponse {}
 
 message MarkReviewedCommand {}
 
+message SnoozeUntilUpdateCommand {
+  string code_review_id = 1;
+}
+
 service Workboard {
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
 
   rpc MarkReviewed(MarkReviewedCommand) returns (CommandResponse) {}
+
+  rpc SnoozeUntilUpdate(SnoozeUntilUpdateCommand) returns (CommandResponse) {}
 }

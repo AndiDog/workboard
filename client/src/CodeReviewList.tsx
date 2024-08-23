@@ -5,6 +5,7 @@ import {
   GetCodeReviewsResponse,
   CodeReviewStatus,
   GitHubPullRequestStatus,
+  SnoozeUntilUpdateCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 
@@ -70,10 +71,50 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
       const thiz = this;
       client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
-        sortCodeReviews(res);
+        if (res !== null) {
+          sortCodeReviews(res);
+        }
         thiz.setState({
           codeReviewsGrpcResult: toGrpcResult(error, res),
         });
+      });
+    });
+  }
+
+  onSnoozeUntilUpdate(event: Event, codeReviewId: string) {
+    event.preventDefault();
+
+    let client = new WorkboardClient('https://localhost:16667');
+
+    const thiz = this;
+    client.SnoozeUntilUpdate(
+      new SnoozeUntilUpdateCommand({ codeReviewId }),
+      null,
+      (error, res) => {
+        const commandResult = toGrpcResult(error, res);
+        if (!commandResult.ok) {
+          console.error(
+            `Failed to snooze until update: ${commandResult.error}`,
+          );
+          return;
+        }
+
+        thiz.refetchCodeReview(codeReviewId);
+      },
+    );
+  }
+
+  // TODO: Only re-fetch single code review, not all. Delete from state if the code review is gone from database.
+  refetchCodeReview(_codeReviewId: string) {
+    let client = new WorkboardClient('https://localhost:16667');
+
+    const thiz = this;
+    client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
+      if (res !== null) {
+        sortCodeReviews(res);
+      }
+      thiz.setState({
+        codeReviewsGrpcResult: toGrpcResult(error, res),
       });
     });
   }
@@ -103,7 +144,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                 >
                   <td>
                     <span className="repo-name">
-                      {codeReview.githubFields?.repo.name || ''}
+                      {codeReview.githubFields
+                        ? `${codeReview.githubFields.repo.organizationName}/${codeReview.githubFields.repo.name}`
+                        : null}
                     </span>
                   </td>
                   <td
@@ -136,7 +179,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
                           <>
                             <button>Snooze for 1 day</button>
-                            <button>Snooze until update</button>
+                            <button
+                              onClick={(event) =>
+                                this.onSnoozeUntilUpdate(event, codeReview.id)
+                              }
+                            >
+                              Snooze until update
+                            </button>
                           </>
                         )}
 
