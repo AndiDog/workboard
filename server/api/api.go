@@ -363,6 +363,37 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 	return codeReview, nil
 }
 
+func (s *WorkboardServer) ReviewedDeleteOnMerge(ctx context.Context, cmd *proto.ReviewedDeleteOnMergeCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
+	logger.Info("ReviewedDeleteOnMerge")
+
+	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get code review in order to mark it reviewed-delete-on-merge")
+	}
+
+	if codeReview.GithubFields != nil {
+		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
+
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE
+		nowTimestamp := time.Now().Unix()
+		codeReview.LastChangedTimestamp = nowTimestamp
+		codeReview.BringBackToReviewIfNotMergedUntilTimestamp = nowTimestamp + 3600*4
+
+		logger.Info(
+			"Marked GitHub PR as reviewed-delete-on-merge")
+	} else {
+		return nil, errors.Wrap(err, "only GitHub PRs supported in ReviewedDeleteOnMerge until now")
+	}
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to store reviewed code review")
+	}
+
+	return &proto.CommandResponse{}, nil
+}
+
 func (s *WorkboardServer) SnoozeUntilUpdate(ctx context.Context, cmd *proto.SnoozeUntilUpdateCommand) (*proto.CommandResponse, error) {
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("SnoozeUntilUpdate")

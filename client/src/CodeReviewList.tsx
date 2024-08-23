@@ -6,9 +6,12 @@ import {
   CodeReviewStatus,
   GitHubPullRequestStatus,
   SnoozeUntilUpdateCommand,
+  ReviewedDeleteOnMergeCommand,
+  CommandResponse,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
+import { RpcError } from 'grpc-web';
 
 type CodeReviewListState = {
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
@@ -92,9 +95,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     });
   }
 
-  onSnoozeUntilUpdate(event: Event, codeReviewId: string) {
-    event.preventDefault();
-
+  runCommandOnSingleCodeReview(
+    codeReviewId: string,
+    commandDesc: string,
+    runCommand: (
+      client: WorkboardClient,
+      onResult: (error: RpcError, res: CommandResponse) => void,
+    ) => void,
+  ) {
     const thiz = this;
     this.setState(
       {
@@ -105,20 +113,48 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       },
       () => {
         let client = new WorkboardClient('https://localhost:16667');
+        runCommand(client, (error, res) => {
+          const commandResult = toGrpcResult(error, res);
+          if (!commandResult.ok) {
+            console.error(
+              `Command failed (${commandDesc}): ${commandResult.error}`,
+            );
 
+            // Continue to refresh since that will remove the code review from `codeReviewIdsWithActiveCommands`
+            // and after an error, it's probably a good idea to get the latest data.
+          }
+
+          thiz.refetchCodeReview(codeReviewId);
+        });
+      },
+    );
+  }
+
+  onReviewedDeleteOnMerge(event: Event, codeReviewId: string) {
+    event.preventDefault();
+    this.runCommandOnSingleCodeReview(
+      codeReviewId,
+      'mark as reviewed, delete on merge',
+      (client, onResult) => {
+        client.ReviewedDeleteOnMerge(
+          new ReviewedDeleteOnMergeCommand({ codeReviewId }),
+          null,
+          onResult,
+        );
+      },
+    );
+  }
+
+  onSnoozeUntilUpdate(event: Event, codeReviewId: string) {
+    event.preventDefault();
+    this.runCommandOnSingleCodeReview(
+      codeReviewId,
+      'snooze until update',
+      (client, onResult) => {
         client.SnoozeUntilUpdate(
           new SnoozeUntilUpdateCommand({ codeReviewId }),
           null,
-          (error, res) => {
-            const commandResult = toGrpcResult(error, res);
-            if (!commandResult.ok) {
-              console.error(
-                `Failed to snooze until update: ${commandResult.error}`,
-              );
-            }
-
-            thiz.refetchCodeReview(codeReviewId);
-          },
+          onResult,
         );
       },
     );
@@ -230,7 +266,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED &&
                         codeReview.status !=
                           CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE && (
-                          <button className="action-reviewed-delete-on-merge">
+                          <button
+                            className="action-reviewed-delete-on-merge"
+                            onClick={(event) =>
+                              this.onReviewedDeleteOnMerge(event, codeReview.id)
+                            }
+                          >
                             I reviewed or merged; delete once merged
                           </button>
                         )}

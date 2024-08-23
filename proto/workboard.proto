@@ -32,6 +32,7 @@ message CodeReview {
 
   // These are only used in case of certain `status` value
   int64 snooze_until_updated_at_changed_from = 6;
+  int64 bring_back_to_review_if_not_merged_until_timestamp = 7;
 }
 
 enum CodeReviewStatus {
@@ -88,6 +89,10 @@ message CommandResponse {}
 
 message MarkReviewedCommand {}
 
+message ReviewedDeleteOnMergeCommand {
+  string code_review_id = 1;
+}
+
 message SnoozeUntilUpdateCommand {
   string code_review_id = 1;
 }
@@ -96,6 +101,9 @@ service Workboard {
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
 
   rpc MarkReviewed(MarkReviewedCommand) returns (CommandResponse) {}
+
+  rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
+      returns (CommandResponse) {}
 
   rpc SnoozeUntilUpdate(SnoozeUntilUpdateCommand) returns (CommandResponse) {}
 }
