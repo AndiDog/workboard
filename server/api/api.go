@@ -261,7 +261,28 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCode
 	logger := s.logger
 	logger.Info("GetCodeReviews")
 
-	codeReviews, err := s.refreshCodeReviews(ctx)
+	var lastCodeReviewsRefresh int64 = 0
+	_, err := s.db.Get("last_code_reviews_refresh", &lastCodeReviewsRefresh)
+	if err != nil {
+		return nil, err
+	}
+	nowTimestamp := time.Now().Unix()
+	var codeReviews map[string]*proto.CodeReview
+	if lastCodeReviewsRefresh < nowTimestamp && nowTimestamp-lastCodeReviewsRefresh > 3600 {
+		if lastCodeReviewsRefresh == 0 {
+			logger.Debugw("No code reviews refresh known in database, triggering refresh")
+		} else {
+			logger.Debugw("Last code reviews refresh was long ago, triggering refresh", "secondsAgo", nowTimestamp-lastCodeReviewsRefresh)
+		}
+		codeReviews, err = s.refreshCodeReviews(ctx)
+	} else {
+		logger.Debugw("Last code reviews refresh is recent, returning cached code reviews without refresh")
+		codeReviews, err = s.getCodeReviews()
+	}
+	if err != nil {
+		return nil, err
+	}
+	err = s.db.Set("last_code_reviews_refresh", &nowTimestamp)
 	if err != nil {
 		return nil, err
 	}
