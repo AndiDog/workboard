@@ -1,5 +1,9 @@
+.PHONY: client-lint
+client-lint:
+	cd client && npm run build
+
 .PHONY: client-watch
-client-watch:
+client-watch: client-lint
 	cd client && npm run dev
 
 .PHONY: generate-server
