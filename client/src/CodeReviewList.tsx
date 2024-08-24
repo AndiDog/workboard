@@ -8,10 +8,12 @@ import {
   SnoozeUntilUpdateCommand,
   ReviewedDeleteOnMergeCommand,
   CommandResponse,
+  SnoozeUntilMentionedCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
 import { RpcError } from 'grpc-web';
+import { staticAssertOnce } from './util';
 
 type CodeReviewListState = {
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
@@ -19,32 +21,80 @@ type CodeReviewListState = {
   codeReviewIdsWithActiveCommands: Set<string>;
 };
 
-function codeReviewStatusToString(status: CodeReviewStatus): string {
-  switch (status) {
-    case CodeReviewStatus.CODE_REVIEW_STATUS_NEW:
-      return 'new';
-    case CodeReviewStatus.CODE_REVIEW_STATUS_MERGED:
-      return 'merged';
-    case CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME:
-      return 'snoozed-until-time';
-    case CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE:
-      return 'snoozed-until-update';
-    case CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE:
-      return 'reviewed-delete-on-merge';
-    case CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED:
-      return 'closed';
-  }
-  throw new Error(`Unhandled value for CodeReviewStatus: ${status}`);
+interface EnumToStringObject {
+  [index: number]: string;
 }
+
+const codeReviewStatusToStringMap: EnumToStringObject = {
+  [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 'closed',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 'deleted',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 'merged',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW]: 'must-review',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_NEW]: 'new',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE]:
+    'reviewed-delete-on-merge',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED]:
+    'snoozed-until-mentioned',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME]:
+    'snoozed-until-time',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE]:
+    'snoozed-until-update',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_UNSPECIFIED]:
+    '<codeReviewStatusToStringMap logic error: unspecified enum value>',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE]:
+    'updated-after-snooze',
+};
+
+function codeReviewStatusToString(status: CodeReviewStatus): string {
+  staticAssertOnce('2a6b2ef3-a45e-493f-b7d0-367db5d8e49b', () => {
+    for (const x of Object.values(CodeReviewStatus)) {
+      if (typeof x !== 'number') {
+        continue;
+      }
+      if (codeReviewStatusToStringMap[x as number] === undefined) {
+        throw new Error(
+          `\`codeReviewStatusToStringMap\` does not contain all enum variants of \`CodeReviewStatus\`: ${x} is missing`,
+        );
+      }
+    }
+  });
+
+  const value = codeReviewStatusToStringMap[status];
+  if (value === undefined) {
+    return '<codeReviewStatusToString logic error: unhandled enum value>';
+  }
+  return value;
+}
+
+const gitHubPullRequestStatusToStringMap: EnumToStringObject = {
+  [GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED]: 'closed',
+  [GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED]: 'merged',
+  [GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_OPEN]: 'open',
+  [GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED]:
+    '<gitHubPullRequestStatusToStringMap logic error: unspecified enum value>',
+};
 
 function gitHubPullRequestStatusToString(
   status: GitHubPullRequestStatus,
 ): string {
-  switch (status) {
-    case GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_OPEN:
-      return 'open';
+  staticAssertOnce('e29de9cb-6dd7-4a8d-a756-fc60e153f6eb', () => {
+    for (const x of Object.values(GitHubPullRequestStatus)) {
+      if (typeof x !== 'number') {
+        continue;
+      }
+      if (gitHubPullRequestStatusToStringMap[x as number] === undefined) {
+        throw new Error(
+          `\`gitHubPullRequestStatusToStringMap\` does not contain all enum variants of \`GitHubPullRequestStatus\`: ${x} is missing`,
+        );
+      }
+    }
+  });
+
+  const value = gitHubPullRequestStatusToStringMap[status];
+  if (value === undefined) {
+    return '<gitHubPullRequestStatusToString logic error: unhandled enum value>';
   }
-  throw new Error(`Unhandled value for GitHubPullRequestStatus: ${status}`);
+  return value;
 }
 
 function sortCodeReviews(res: GetCodeReviewsResponse) {
@@ -145,6 +195,21 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  onSnoozeUntilMentioned(event: Event, codeReviewId: string) {
+    event.preventDefault();
+    this.runCommandOnSingleCodeReview(
+      codeReviewId,
+      'snooze until mentioned',
+      (client, onResult) => {
+        client.SnoozeUntilMentioned(
+          new SnoozeUntilMentionedCommand({ codeReviewId }),
+          null,
+          onResult,
+        );
+      },
+    );
+  }
+
   onSnoozeUntilUpdate(event: Event, codeReviewId: string) {
     event.preventDefault();
     this.runCommandOnSingleCodeReview(
@@ -185,121 +250,136 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     // TODO
   }
 
-  render = () => (
-    <>
-      <table className="pull-requests">
-        <thead>
-          <tr>
-            <th>Repo</th>
-            <th>Your status</th>
-            <th>GitHub state</th>
-            <th>Actions</th>
-            <th>Last updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          {this.state.codeReviewsGrpcResult?.ok &&
-            this.state.codeReviewsGrpcResult.res.codeReviews.map(
-              (codeReview) => (
-                <tr
-                  className={`status-${codeReviewStatusToString(codeReview.status)}${codeReview.renderOnlyFields.recentlyTouchedByUser ? ' last-clicked' : ''}`}
-                >
-                  <td>
-                    <span className="repo-name">
-                      {codeReview.githubFields
-                        ? `${codeReview.githubFields.repo.organizationName}/${codeReview.githubFields.repo.name}`
-                        : null}
-                    </span>
-                  </td>
-                  <td
-                    className={`status-${codeReviewStatusToString(codeReview.status)}`}
-                  >
-                    {codeReviewStatusToString(codeReview.status)}
-                  </td>
-                  <td>
-                    {codeReview.githubFields
-                      ? gitHubPullRequestStatusToString(
-                          codeReview.githubFields.status,
-                        )
-                      : ''}
-                  </td>
-                  <td>
-                    <a
-                      href={codeReview.githubFields?.url || ''}
-                      className="pr-link"
-                      target="_blank"
-                      rel="noopener"
-                      onClick={() => this.uncache(codeReview.id)}
-                    >
-                      {codeReview.githubFields?.title || ''}
-                    </a>
+  render() {
+    const nowTimestamp = Date.now() / 1000;
 
-                    <div className="actions">
-                      {codeReview.status !=
-                        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
-                        codeReview.status !=
-                          CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
-                          <>
-                            <button>Snooze for 1 day</button>
-                            <button
-                              onClick={(event) =>
-                                this.onSnoozeUntilUpdate(event, codeReview.id)
-                              }
-                            >
-                              Snooze until update
-                            </button>
-                          </>
+    return (
+      <>
+        <table className="pull-requests">
+          <thead>
+            <tr>
+              <th>Repo</th>
+              <th>Your status</th>
+              <th>GitHub state</th>
+              <th>Actions</th>
+              <th>Last updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {this.state.codeReviewsGrpcResult?.ok &&
+              this.state.codeReviewsGrpcResult.res.codeReviews.map(
+                (codeReview) => (
+                  <tr
+                    className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? ' last-clicked' : ''}`}
+                  >
+                    <td>
+                      <span className="repo-name">
+                        {codeReview.githubFields
+                          ? `${codeReview.githubFields.repo.organizationName}/${codeReview.githubFields.repo.name}`
+                          : null}
+                      </span>
+                    </td>
+                    <td
+                      className={`status-${codeReviewStatusToString(codeReview.status)}`}
+                    >
+                      {codeReviewStatusToString(codeReview.status)}
+                    </td>
+                    <td>
+                      {codeReview.githubFields
+                        ? gitHubPullRequestStatusToString(
+                            codeReview.githubFields.status,
+                          )
+                        : ''}
+                    </td>
+                    <td>
+                      <a
+                        href={codeReview.githubFields?.url || ''}
+                        className="pr-link"
+                        target="_blank"
+                        rel="noopener"
+                        onClick={() => this.uncache(codeReview.id)}
+                      >
+                        {codeReview.githubFields?.title || ''}
+                      </a>
+
+                      <div className="actions">
+                        {codeReview.status !=
+                          CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
+                          codeReview.status !=
+                            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
+                            <>
+                              <button>Snooze for 1 day</button>
+                              <button
+                                onClick={(event) =>
+                                  this.onSnoozeUntilUpdate(event, codeReview.id)
+                                }
+                              >
+                                Snooze until update
+                              </button>
+                            </>
+                          )}
+
+                        {codeReview.status !=
+                          CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW && (
+                          <button>Mark 'must review'</button>
                         )}
 
-                      {codeReview.status !=
-                        CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW && (
-                        <button>Mark 'must review'</button>
-                      )}
+                        {codeReview.githubFields?.status !=
+                          GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED &&
+                          codeReview.githubFields?.status !=
+                            GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED &&
+                          codeReview.status !=
+                            CodeReviewStatus.CODE_REVIEW_STATUS_MERGED &&
+                          codeReview.status !=
+                            CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED &&
+                          codeReview.status !=
+                            CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE && (
+                            <button
+                              className="action-reviewed-delete-on-merge"
+                              onClick={(event) =>
+                                this.onReviewedDeleteOnMerge(
+                                  event,
+                                  codeReview.id,
+                                )
+                              }
+                            >
+                              I reviewed or merged; delete once merged
+                            </button>
+                          )}
 
-                      {codeReview.githubFields?.status !=
-                        GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED &&
-                        codeReview.githubFields?.status !=
-                          GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED &&
-                        codeReview.status !=
-                          CodeReviewStatus.CODE_REVIEW_STATUS_MERGED &&
-                        codeReview.status !=
-                          CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED &&
-                        codeReview.status !=
-                          CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE && (
+                        {(codeReview.status ==
+                          CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
+                          codeReview.status ==
+                            CodeReviewStatus.CODE_REVIEW_STATUS_MERGED) && (
+                          <button className="action-delete">Delete</button>
+                        )}
+
+                        {!codeReview.renderOnlyFields.authorIsSelf && (
                           <button
-                            className="action-reviewed-delete-on-merge"
                             onClick={(event) =>
-                              this.onReviewedDeleteOnMerge(event, codeReview.id)
+                              this.onSnoozeUntilMentioned(event, codeReview.id)
                             }
                           >
-                            I reviewed or merged; delete once merged
+                            Snooze until I'm mentioned
+                            <br />
+                            <small>(= someone else reviews)</small>
                           </button>
                         )}
 
-                      {(codeReview.status ==
-                        CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
-                        codeReview.status ==
-                          CodeReviewStatus.CODE_REVIEW_STATUS_MERGED) && (
-                        <button className="action-delete">Delete</button>
-                      )}
-
-                      {!codeReview.renderOnlyFields.authorIsSelf && (
-                        <button>
-                          Snooze until I'm mentioned (= someone else reviews)
-                        </button>
-                      )}
-
-                      {this.state.codeReviewIdsWithActiveCommands.has(
-                        codeReview.id,
-                      ) && <Spinner />}
-                    </div>
-                  </td>
-                  <td>{codeReview.renderOnlyFields.lastUpdatedDescription}</td>
-                </tr>
-              ),
-            )}
-        </tbody>
-      </table>
-    </>
-  );
+                        {this.state.codeReviewIdsWithActiveCommands.has(
+                          codeReview.id,
+                        ) && <Spinner />}
+                      </div>
+                    </td>
+                    <td>
+                      {codeReview.renderOnlyFields.lastUpdatedDescription}
+                    </td>
+                  </tr>
+                ),
+              )}
+          </tbody>
+        </table>
+      </>
+    );
+  }
 }

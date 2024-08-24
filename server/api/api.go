@@ -394,6 +394,35 @@ func (s *WorkboardServer) ReviewedDeleteOnMerge(ctx context.Context, cmd *proto.
 	return &proto.CommandResponse{}, nil
 }
 
+func (s *WorkboardServer) SnoozeUntilMentioned(ctx context.Context, cmd *proto.SnoozeUntilMentionedCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
+	logger.Info("SnoozeUntilMentioned")
+
+	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get code review in order to snooze it until mentioned")
+	}
+
+	if codeReview.GithubFields != nil {
+		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
+
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED
+		codeReview.LastChangedTimestamp = time.Now().Unix()
+
+		logger.Info(
+			"Snoozed GitHub PR until mentioned")
+	} else {
+		return nil, errors.Wrap(err, "only GitHub PRs supported in SnoozeUntilMentioned until now")
+	}
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to store snoozed code review")
+	}
+
+	return &proto.CommandResponse{}, nil
+}
+
 func (s *WorkboardServer) SnoozeUntilUpdate(ctx context.Context, cmd *proto.SnoozeUntilUpdateCommand) (*proto.CommandResponse, error) {
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("SnoozeUntilUpdate")

@@ -12,8 +12,6 @@ message CodeReviewRenderOnlyFields {
   bool author_is_self = 1;
 
   string last_updated_description = 2;
-
-  bool recently_touched_by_user = 3;
 }
 
 // Pull/merge request on a platform like GitHub
@@ -37,24 +35,25 @@ message CodeReview {
 
 enum CodeReviewStatus {
   CODE_REVIEW_STATUS_UNSPECIFIED = 0;
-  CODE_REVIEW_STATUS_NEW = 1;
+
+  CODE_REVIEW_STATUS_CLOSED = 7;
+  CODE_REVIEW_STATUS_DELETED = 11;
   CODE_REVIEW_STATUS_MERGED = 2;
+  CODE_REVIEW_STATUS_MUST_REVIEW = 5;
+  CODE_REVIEW_STATUS_NEW = 1;
+  CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE = 6;
+  CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED = 10;
   CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME = 3;
   CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE = 4;
-  CODE_REVIEW_STATUS_MUST_REVIEW = 5;
-  CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE = 6;
-  CODE_REVIEW_STATUS_CLOSED = 7;
-  CODE_REVIEW_STATUS_REVIEWED_DELETED = 8;
   CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE = 9;
-  CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED = 10;
-  CODE_REVIEW_STATUS_DELETED = 11;
 }
 
 enum GitHubPullRequestStatus {
   GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED = 0;
-  GITHUB_PULL_REQUEST_STATUS_OPEN = 1;
+
   GITHUB_PULL_REQUEST_STATUS_CLOSED = 2;
   GITHUB_PULL_REQUEST_STATUS_MERGED = 3;
+  GITHUB_PULL_REQUEST_STATUS_OPEN = 1;
 }
 
 message GitHubPullRequestFields {
@@ -93,6 +92,10 @@ message ReviewedDeleteOnMergeCommand {
   string code_review_id = 1;
 }
 
+message SnoozeUntilMentionedCommand {
+  string code_review_id = 1;
+}
+
 message SnoozeUntilUpdateCommand {
   string code_review_id = 1;
 }
@@ -103,6 +106,9 @@ service Workboard {
   rpc MarkReviewed(MarkReviewedCommand) returns (CommandResponse) {}
 
   rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
+      returns (CommandResponse) {}
+
+  rpc SnoozeUntilMentioned(SnoozeUntilMentionedCommand)
       returns (CommandResponse) {}
 
   rpc SnoozeUntilUpdate(SnoozeUntilUpdateCommand) returns (CommandResponse) {}
