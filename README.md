@@ -46,6 +46,8 @@ echo 'TEST_GITHUB_USER=FILL_IN_YOUR_USERNAME` > server/.env-local
 make server-watch
 ```
 
+To debug in Visual Studio Code, create a regular Go launch configuration with `"program": "server/main.go"`. Cancel the `make server-watch` command and instead run or debug the server from the editor.
+
 ### Client
 
 Ensure your browser trusts the CA certificate (`test-pki/ca/ca.crt`) or else you'll get errors (gRPC request fails in browser, server logs something like `http: TLS handshake error from 127.0.0.1:57598: remote error: tls: unknown certificate authority`).
