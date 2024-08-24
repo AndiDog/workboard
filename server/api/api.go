@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/go-github/v63/github"
 	"github.com/pkg/errors"
-	"github.com/xeonx/timeago"
 	"go.uber.org/zap"
 
 	"andidog.de/workboard/server/database"
@@ -55,16 +54,16 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED
 	}
 
-	lastUpdatedDescription := ""
 	var updatedAtTimestamp int64 = 0
 	if issue.UpdatedAt != nil {
-		lastUpdatedDescription = timeago.NoMax(timeago.English).Format(issue.UpdatedAt.Time)
 		updatedAtTimestamp = issue.UpdatedAt.Time.Unix()
 	}
 
 	codeReview := &proto.CodeReview{
-		Id:     id,
-		Status: proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
+		Id:                   id,
+		Status:               proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
+		LastChangedTimestamp: 0,
+		LastUpdatedTimestamp: updatedAtTimestamp,
 		GithubFields: &proto.GitHubPullRequestFields{
 			Url:    *issue.HTMLURL,
 			Title:  *issue.Title,
@@ -77,8 +76,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 			UpdatedAtTimestamp: updatedAtTimestamp,
 		},
 		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
-			AuthorIsSelf:           issue.User != nil && issue.User.Name != nil && *issue.User.Name == gitHubUserSelf,
-			LastUpdatedDescription: lastUpdatedDescription,
+			AuthorIsSelf: issue.User != nil && issue.User.Name != nil && *issue.User.Name == gitHubUserSelf,
 		},
 	}
 	if existingCodeReview, ok := existingCodeReviews[id]; ok {
@@ -220,11 +218,14 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 		if err != nil {
 			return nil, err
 		}
+		logger := logger.With("url", *issue.HTMLURL)
+		logger.Debug("Querying GitHub PR")
 		pr, _, err := client.PullRequests.Get(ctx, owner, repo, *issue.Number)
 		if err != nil {
-			logger.Errorw("Failed to fetch GitHub PR details for reviews refresh", "err", err, "url", *issue.HTMLURL)
+			logger.Errorw("Failed to fetch GitHub PR details for reviews refresh", "err", err)
 			return nil, errors.Wrap(err, "failed to fetch GitHub PR details for reviews refresh")
 		}
+		logger.Debug("Queried GitHub PR")
 
 		id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser)
 		if err != nil {
@@ -422,6 +423,43 @@ func (s *WorkboardServer) SnoozeUntilMentioned(ctx context.Context, cmd *proto.S
 			"Snoozed GitHub PR until mentioned")
 	} else {
 		return nil, errors.Wrap(err, "only GitHub PRs supported in SnoozeUntilMentioned until now")
+	}
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to store snoozed code review")
+	}
+
+	return &proto.CommandResponse{}, nil
+}
+
+func (s *WorkboardServer) SnoozeUntilTime(ctx context.Context, cmd *proto.SnoozeUntilTimeCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewId", cmd.CodeReviewId, "snoozeUntilTimestamp", cmd.SnoozeUntilTimestamp)
+	logger.Info("SnoozeUntilTime")
+
+	if cmd.SnoozeUntilTimestamp <= 0 {
+		return nil, errors.New("SnoozeUntilTimeCommand.snooze_until_timestamp must be positive")
+	}
+	if cmd.SnoozeUntilTimestamp <= time.Now().Unix()+60 {
+		return nil, errors.New("SnoozeUntilTimeCommand.snooze_until_timestamp must be farther in the future")
+	}
+
+	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get code review in order to snooze it until time")
+	}
+
+	if codeReview.GithubFields != nil {
+		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
+
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME
+		codeReview.LastChangedTimestamp = time.Now().Unix()
+		codeReview.SnoozeUntilTimestamp = cmd.SnoozeUntilTimestamp
+
+		logger.Info(
+			"Snoozed GitHub PR until time")
+	} else {
+		return nil, errors.Wrap(err, "only GitHub PRs supported in SnoozeUntilTime until now")
 	}
 
 	err = s.storeCodeReview(codeReview)

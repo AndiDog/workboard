@@ -51,6 +51,22 @@ th {
   font-family: 'DejaVu Sans Mono', monospace;
 }
 
+td.status {
+  /*
+   Rather grow vertically to display the status than having the table colum sizes jump from small to large,
+   disturbing the user's visual overview.
+   */
+  width: 8em;
+}
+
+td.github-status {
+  /*
+   Rather grow vertically to display the status than having the table colum sizes jump from small to large,
+   disturbing the user's visual overview.
+   */
+  width: 4em;
+}
+
 td.status-closed {
   background-color: #d53d26dd;
 }

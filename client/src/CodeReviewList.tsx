@@ -1,4 +1,5 @@
 import { Component } from 'preact';
+import * as timeago from 'timeago.js';
 import {
   WorkboardClient,
   GetCodeReviewsQuery,
@@ -10,6 +11,7 @@ import {
   CommandResponse,
   SnoozeUntilMentionedCommand,
   MarkMustReviewCommand,
+  SnoozeUntilTimeCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -244,6 +246,30 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  onSnoozeUntilTime(
+    event: Event,
+    codeReviewId: string,
+    secondsFromNow: number,
+  ) {
+    event.preventDefault();
+    this.runCommandOnSingleCodeReview(
+      codeReviewId,
+      'snooze until time',
+      (client, onResult) => {
+        client.SnoozeUntilTime(
+          new SnoozeUntilTimeCommand({
+            codeReviewId,
+            snoozeUntilTimestamp: Math.floor(
+              Date.now() / 1000 + secondsFromNow,
+            ),
+          }),
+          null,
+          onResult,
+        );
+      },
+    );
+  }
+
   onSnoozeUntilUpdate(event: Event, codeReviewId: string) {
     event.preventDefault();
     this.runCommandOnSingleCodeReview(
@@ -314,11 +340,40 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                       </span>
                     </td>
                     <td
-                      className={`status-${codeReviewStatusToString(codeReview.status)}`}
+                      className={`status status-${codeReviewStatusToString(codeReview.status)}`}
                     >
-                      {codeReviewStatusToString(codeReview.status)}
+                      {codeReview.status ==
+                        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME && (
+                        <>
+                          Snoozed until:{' '}
+                          {timeago.format(
+                            new Date(codeReview.snoozeUntilTimestamp * 1000),
+                            'en',
+                          )}
+                        </>
+                      )}
+
+                      {codeReview.status ==
+                        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
+                        <>
+                          Snoozed until update (last update was{' '}
+                          {timeago.format(
+                            new Date(
+                              codeReview.snoozeUntilUpdatedAtChangedFrom * 1000,
+                            ),
+                            'en',
+                          )}
+                          )
+                        </>
+                      )}
+
+                      {codeReview.status !=
+                        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
+                        codeReview.status !=
+                          CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE &&
+                        codeReviewStatusToString(codeReview.status)}
                     </td>
-                    <td>
+                    <td className="github-status">
                       {codeReview.githubFields
                         ? gitHubPullRequestStatusToString(
                             codeReview.githubFields.status,
@@ -342,7 +397,18 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           codeReview.status !=
                             CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
                             <>
-                              <button>Snooze for 1 day</button>
+                              <button
+                                onClick={(event) =>
+                                  // TODO Offer choice of how long to snooze
+                                  this.onSnoozeUntilTime(
+                                    event,
+                                    codeReview.id,
+                                    86400,
+                                  )
+                                }
+                              >
+                                Snooze for 1 day
+                              </button>
                               <button
                                 onClick={(event) =>
                                   this.onSnoozeUntilUpdate(event, codeReview.id)
@@ -412,7 +478,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                       </div>
                     </td>
                     <td>
-                      {codeReview.renderOnlyFields.lastUpdatedDescription}
+                      {codeReview.lastUpdatedTimestamp > 0
+                        ? timeago.format(
+                            new Date(codeReview.lastUpdatedTimestamp * 1000),
+                            'en',
+                          )
+                        : null}
                     </td>
                   </tr>
                 ),

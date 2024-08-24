@@ -10,8 +10,6 @@ message CodeReviewRenderOnlyFields {
   // itself. For example, `author_is_self` depends for which user the code
   // reviews are listed.
   bool author_is_self = 1;
-
-  string last_updated_description = 2;
 }
 
 // Pull/merge request on a platform like GitHub
@@ -26,11 +24,17 @@ message CodeReview {
 
   CodeReviewRenderOnlyFields render_only_fields = 4;
 
+  // Last change to workboard status by the user. Can be zero if newly imported.
   int64 last_changed_timestamp = 5;
+
+  // Last update of the code review on the platform (e.g. GitHub). Can be zero
+  // if not known.
+  int64 last_updated_timestamp = 9;
 
   // These are only used in case of certain `status` value
   int64 snooze_until_updated_at_changed_from = 6;
   int64 bring_back_to_review_if_not_merged_until_timestamp = 7;
+  int64 snooze_until_timestamp = 8;
 }
 
 enum CodeReviewStatus {
@@ -98,6 +102,12 @@ message SnoozeUntilMentionedCommand {
   string code_review_id = 1;
 }
 
+message SnoozeUntilTimeCommand {
+  string code_review_id = 1;
+
+  int64 snooze_until_timestamp = 2;
+}
+
 message SnoozeUntilUpdateCommand {
   string code_review_id = 1;
 }
@@ -112,6 +122,8 @@ service Workboard {
 
   rpc SnoozeUntilMentioned(SnoozeUntilMentionedCommand)
       returns (CommandResponse) {}
+
+  rpc SnoozeUntilTime(SnoozeUntilTimeCommand) returns (CommandResponse) {}
 
   rpc SnoozeUntilUpdate(SnoozeUntilUpdateCommand) returns (CommandResponse) {}
 }
