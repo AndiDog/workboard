@@ -86,7 +86,9 @@ message GetCodeReviewsResponse {
 
 message CommandResponse {}
 
-message MarkReviewedCommand {}
+message MarkMustReviewCommand {
+  string code_review_id = 1;
+}
 
 message ReviewedDeleteOnMergeCommand {
   string code_review_id = 1;
@@ -103,7 +105,7 @@ message SnoozeUntilUpdateCommand {
 service Workboard {
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
 
-  rpc MarkReviewed(MarkReviewedCommand) returns (CommandResponse) {}
+  rpc MarkMustReview(MarkMustReviewCommand) returns (CommandResponse) {}
 
   rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
       returns (CommandResponse) {}

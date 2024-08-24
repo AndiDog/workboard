@@ -9,6 +9,7 @@ import {
   ReviewedDeleteOnMergeCommand,
   CommandResponse,
   SnoozeUntilMentionedCommand,
+  MarkMustReviewCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -21,6 +22,9 @@ type CodeReviewListState = {
   codeReviewIdsWithActiveCommands: Set<string>;
 };
 
+interface EnumToNumberObject {
+  [index: number]: number;
+}
 interface EnumToStringObject {
   [index: number]: string;
 }
@@ -97,19 +101,34 @@ function gitHubPullRequestStatusToString(
   return value;
 }
 
+const statusSortOrder: EnumToNumberObject = {
+  // Low number = sorted to top, high number = sorted to bottom
+  [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 1,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 999, // not applicable since we filter those out for rendering
+  [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 1,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW]: 2,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_NEW]: 4,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE]: 5,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED]: 5,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME]: 5,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE]: 5,
+  [CodeReviewStatus.CODE_REVIEW_STATUS_UNSPECIFIED]: 0, // sort to top since that would be a logic error the developer should see
+  [CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE]: 1,
+};
+
 function sortCodeReviews(res: GetCodeReviewsResponse) {
-  const statusSortOrder: Record<number, number> = {
-    [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 1,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 999, // not applicable since we filter those out for rendering
-    [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 1,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW]: 2,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE]: 5,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED]: 5,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME]: 5,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE]: 5,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE]: 1,
-    [CodeReviewStatus.CODE_REVIEW_STATUS_UNSPECIFIED]: 4,
-  };
+  staticAssertOnce('19368936-25f5-4a3a-ba7a-4f5e54d09e40', () => {
+    for (const x of Object.values(CodeReviewStatus)) {
+      if (typeof x !== 'number') {
+        continue;
+      }
+      if (statusSortOrder[x as number] === undefined) {
+        throw new Error(
+          `\`statusSortOrder\` does not contain all enum variants of \`CodeReviewStatus\`: ${x} is missing`,
+        );
+      }
+    }
+  });
 
   res.codeReviews.sort((a, b) => {
     return (
@@ -176,6 +195,21 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
           thiz.refetchCodeReview(codeReviewId);
         });
+      },
+    );
+  }
+
+  onMarkMustReview(event: Event, codeReviewId: string) {
+    event.preventDefault();
+    this.runCommandOnSingleCodeReview(
+      codeReviewId,
+      'mark as must-review',
+      (client, onResult) => {
+        client.MarkMustReview(
+          new MarkMustReviewCommand({ codeReviewId }),
+          null,
+          onResult,
+        );
       },
     );
   }
@@ -321,7 +355,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
                         {codeReview.status !=
                           CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW && (
-                          <button>Mark 'must review'</button>
+                          <button
+                            onClick={(event) =>
+                              this.onMarkMustReview(event, codeReview.id)
+                            }
+                          >
+                            Mark 'must review'
+                          </button>
                         )}
 
                         {codeReview.githubFields?.status !=

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"time"
@@ -294,26 +293,6 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCode
 	return res, nil
 }
 
-func (s *WorkboardServer) MarkReviewed(ctx context.Context, cmd *proto.MarkReviewedCommand) (*proto.CommandResponse, error) {
-	log.Printf("MarkReviewed")
-
-	var pr PR
-	ok, err := s.db.Get("andi", &pr)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf("ok=%v pr=%+v\n", ok, pr)
-
-	pr.GitHubURL = "https://andi-test"
-	err = s.db.Set("andi", &pr)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf("value set fine\n")
-
-	return &proto.CommandResponse{}, nil
-}
-
 func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId string) (*proto.CodeReview, error) {
 	logger := s.logger.With("codeReviewId", codeReviewId)
 	logger.Info("Refreshing code review")
@@ -361,6 +340,36 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 	}
 
 	return codeReview, nil
+}
+
+func (s *WorkboardServer) MarkMustReview(ctx context.Context, cmd *proto.MarkMustReviewCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
+	logger.Info("MarkMustReview")
+
+	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get code review in order to mark it must-review")
+	}
+
+	if codeReview.GithubFields != nil {
+		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
+
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_MUST_REVIEW
+		nowTimestamp := time.Now().Unix()
+		codeReview.LastChangedTimestamp = nowTimestamp
+
+		logger.Info(
+			"Marked GitHub PR as must-reviewed")
+	} else {
+		return nil, errors.Wrap(err, "only GitHub PRs supported in MarkMustReview until now")
+	}
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to store must-review code review")
+	}
+
+	return &proto.CommandResponse{}, nil
 }
 
 func (s *WorkboardServer) ReviewedDeleteOnMerge(ctx context.Context, cmd *proto.ReviewedDeleteOnMergeCommand) (*proto.CommandResponse, error) {
