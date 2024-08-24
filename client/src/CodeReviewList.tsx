@@ -270,7 +270,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               this.state.codeReviewsGrpcResult.res.codeReviews.map(
                 (codeReview) => (
                   <tr
-                    className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? ' last-clicked' : ''}`}
+                    className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-clicked' : ' recently-clicked') : ''}`}
                   >
                     <td>
                       <span className="repo-name">

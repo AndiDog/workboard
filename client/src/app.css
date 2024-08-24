@@ -17,8 +17,12 @@ table.pull-requests tr {
   border-bottom: 1px solid #aaa;
 }
 
-table.pull-requests tr.last-clicked {
-  background-color: #66ddf9;
+table.pull-requests tr.recently-clicked {
+  background-color: #c0f0fb;
+}
+
+table.pull-requests tr.very-recently-clicked {
+  background-color: #1ecbf3;
 }
 
 td,
