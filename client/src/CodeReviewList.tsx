@@ -12,26 +12,22 @@ import {
   SnoozeUntilMentionedCommand,
   MarkMustReviewCommand,
   SnoozeUntilTimeCommand,
+  CodeReview,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
 import { RpcError } from 'grpc-web';
-import { staticAssertOnce } from './util';
 
 type CodeReviewListState = {
+  codeReviewGroups?: CodeReviewGroup[];
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
 
   codeReviewIdsWithActiveCommands: Set<string>;
 };
 
-interface EnumToNumberObject {
-  [index: number]: number;
-}
-interface EnumToStringObject {
-  [index: number]: string;
-}
-
-const codeReviewStatusToStringMap: EnumToStringObject = {
+const codeReviewStatusToStringMap: {
+  [codeReviewStatus in CodeReviewStatus]: string;
+} = {
   [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 'closed',
   [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 'deleted',
   [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 'merged',
@@ -52,19 +48,6 @@ const codeReviewStatusToStringMap: EnumToStringObject = {
 };
 
 function codeReviewStatusToString(status: CodeReviewStatus): string {
-  staticAssertOnce('2a6b2ef3-a45e-493f-b7d0-367db5d8e49b', () => {
-    for (const x of Object.values(CodeReviewStatus)) {
-      if (typeof x !== 'number') {
-        continue;
-      }
-      if (codeReviewStatusToStringMap[x as number] === undefined) {
-        throw new Error(
-          `\`codeReviewStatusToStringMap\` does not contain all enum variants of \`CodeReviewStatus\`: ${x} is missing`,
-        );
-      }
-    }
-  });
-
   const value = codeReviewStatusToStringMap[status];
   if (value === undefined) {
     return '<codeReviewStatusToString logic error: unhandled enum value>';
@@ -72,7 +55,9 @@ function codeReviewStatusToString(status: CodeReviewStatus): string {
   return value;
 }
 
-const gitHubPullRequestStatusToStringMap: EnumToStringObject = {
+const gitHubPullRequestStatusToStringMap: {
+  [gitHubPullRequestStatus in GitHubPullRequestStatus]: string;
+} = {
   [GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED]: 'closed',
   [GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED]: 'merged',
   [GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_OPEN]: 'open',
@@ -83,19 +68,6 @@ const gitHubPullRequestStatusToStringMap: EnumToStringObject = {
 function gitHubPullRequestStatusToString(
   status: GitHubPullRequestStatus,
 ): string {
-  staticAssertOnce('e29de9cb-6dd7-4a8d-a756-fc60e153f6eb', () => {
-    for (const x of Object.values(GitHubPullRequestStatus)) {
-      if (typeof x !== 'number') {
-        continue;
-      }
-      if (gitHubPullRequestStatusToStringMap[x as number] === undefined) {
-        throw new Error(
-          `\`gitHubPullRequestStatusToStringMap\` does not contain all enum variants of \`GitHubPullRequestStatus\`: ${x} is missing`,
-        );
-      }
-    }
-  });
-
   const value = gitHubPullRequestStatusToStringMap[status];
   if (value === undefined) {
     return '<gitHubPullRequestStatusToString logic error: unhandled enum value>';
@@ -103,7 +75,9 @@ function gitHubPullRequestStatusToString(
   return value;
 }
 
-const statusSortOrder: EnumToNumberObject = {
+const statusSortOrder: {
+  [codeReviewStatus in CodeReviewStatus]: number;
+} = {
   // Low number = sorted to top, high number = sorted to bottom
   [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 1,
   [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 999, // not applicable since we filter those out for rendering
@@ -118,27 +92,111 @@ const statusSortOrder: EnumToNumberObject = {
   [CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE]: 1,
 };
 
-function sortCodeReviews(res: GetCodeReviewsResponse) {
-  staticAssertOnce('19368936-25f5-4a3a-ba7a-4f5e54d09e40', () => {
-    for (const x of Object.values(CodeReviewStatus)) {
-      if (typeof x !== 'number') {
-        continue;
-      }
-      if (statusSortOrder[x as number] === undefined) {
-        throw new Error(
-          `\`statusSortOrder\` does not contain all enum variants of \`CodeReviewStatus\`: ${x} is missing`,
-        );
-      }
-    }
-  });
+enum CodeReviewGroupType {
+  // Strings in lexicographical order of display top-to-bottom.
+  // The order prefix can be freely changed without having to touch other
+  // places in code. The rest is used for CSS classes such as `tr.code-review-group-type-snoozed`.
+  MergedOrUpdated = '100-merged-or-updated',
+  MustReviewOrCameBackFromSnooze = '200-must-review',
+  Rest = '700-rest',
+  Reviewed = '800-reviewed',
+  Snoozed = '900-snoozed',
+}
 
-  res.codeReviews.sort((a, b) => {
-    return (
-      // Reviews with latest changes are displayed on top, ordered by status
-      (statusSortOrder[a.status] || 999) - (statusSortOrder[b.status] || 999) ||
-      b.githubFields.updatedAtTimestamp - a.githubFields.updatedAtTimestamp
-    );
-  });
+const codeReviewGroupTypes: Array<CodeReviewGroupType> = Object.keys(
+  CodeReviewGroupType,
+).map((groupType) => {
+  const key = groupType as keyof typeof CodeReviewGroupType;
+  return CodeReviewGroupType[key];
+});
+
+const codeReviewGroupTypeHeaderDescription: {
+  [groupType in CodeReviewGroupType]: string;
+} = {
+  [CodeReviewGroupType.MergedOrUpdated]: 'Merged or updated',
+  [CodeReviewGroupType.MustReviewOrCameBackFromSnooze]: 'Must review',
+  [CodeReviewGroupType.Rest]: 'Other',
+  [CodeReviewGroupType.Reviewed]: 'Reviewed',
+  [CodeReviewGroupType.Snoozed]: 'Snoozed',
+};
+
+type CodeReviewGroup = {
+  groupType: CodeReviewGroupType;
+  groupTypeStrWithoutOrderPrefix: string; // e.g. `must-review` (trimmed from `000-must-review`; used for CSS classes)
+  sortedCodeReviews: CodeReview[];
+};
+
+function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
+  const groupTypeStrToReviews: {
+    [groupTypeStr: string]: CodeReview[];
+  } = {};
+
+  for (const codeReview of res.codeReviews) {
+    let groupType: CodeReviewGroupType;
+
+    if (
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
+      codeReview.status ==
+        CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE
+    ) {
+      groupType = CodeReviewGroupType.MergedOrUpdated;
+    } else if (
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW
+    ) {
+      groupType = CodeReviewGroupType.MustReviewOrCameBackFromSnooze;
+    } else if (
+      codeReview.status ==
+        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED ||
+      codeReview.status ==
+        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME ||
+      codeReview.status ==
+        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE
+    ) {
+      groupType = CodeReviewGroupType.Snoozed;
+    } else if (
+      codeReview.status ==
+      CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE
+    ) {
+      groupType = CodeReviewGroupType.Reviewed;
+    } else {
+      groupType = CodeReviewGroupType.Rest;
+    }
+
+    if (groupTypeStrToReviews[groupType] === undefined) {
+      groupTypeStrToReviews[groupType] = [];
+    }
+    groupTypeStrToReviews[groupType].push(codeReview);
+  }
+
+  // Sort code reviews within each group
+  for (const codeReviews of Object.values(groupTypeStrToReviews)) {
+    codeReviews.sort((a, b) => {
+      return (
+        // Reviews with latest changes are displayed on top, ordered by status
+        (statusSortOrder[a.status] || 999) -
+          (statusSortOrder[b.status] || 999) ||
+        b.githubFields.updatedAtTimestamp - a.githubFields.updatedAtTimestamp
+      );
+    });
+  }
+
+  const codeReviewGroups: CodeReviewGroup[] = [];
+  for (const groupType of codeReviewGroupTypes) {
+    if (groupTypeStrToReviews[groupType] === undefined) {
+      // No reviews in this group
+      continue;
+    }
+
+    codeReviewGroups.push({
+      groupType,
+      groupTypeStrWithoutOrderPrefix: groupType.substring(
+        groupType.indexOf('-') + 1,
+      ),
+      sortedCodeReviews: groupTypeStrToReviews[groupType],
+    });
+  }
+
+  return codeReviewGroups;
 }
 
 export default class CodeReviewList extends Component<{}, CodeReviewListState> {
@@ -146,6 +204,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     super(props);
 
     this.state = {
+      codeReviewGroups: undefined,
       codeReviewIdsWithActiveCommands: new Set(),
     };
   }
@@ -156,10 +215,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
       const thiz = this;
       client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
+        let codeReviewGroups: CodeReviewGroup[] | undefined =
+          thiz.state.codeReviewGroups;
         if (res !== null) {
-          sortCodeReviews(res);
+          codeReviewGroups = sortCodeReviews(res);
         }
+
         thiz.setState({
+          codeReviewGroups,
           codeReviewsGrpcResult: toGrpcResult(error, res),
         });
       });
@@ -291,15 +354,19 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     const thiz = this;
     client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
-      if (res !== null) {
-        sortCodeReviews(res);
-      }
-
       const newCodeReviewIdsWithActiveCommands = new Set(
         this.state.codeReviewIdsWithActiveCommands,
       );
       newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
+
+      let codeReviewGroups: CodeReviewGroup[] | undefined =
+        thiz.state.codeReviewGroups;
+      if (res !== null) {
+        codeReviewGroups = sortCodeReviews(res);
+      }
+
       thiz.setState({
+        codeReviewGroups,
         codeReviewsGrpcResult: toGrpcResult(error, res),
         codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
       });
@@ -327,167 +394,187 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           </thead>
           <tbody>
             {this.state.codeReviewsGrpcResult?.ok &&
-              this.state.codeReviewsGrpcResult.res.codeReviews.map(
-                (codeReview) => (
+              this.state.codeReviewGroups!.map((codeReviewGroup) => (
+                <>
                   <tr
-                    className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-clicked' : ' recently-clicked') : ''}`}
+                    className={`code-review-group code-review-group-type-${codeReviewGroup.groupTypeStrWithoutOrderPrefix}`}
                   >
-                    <td>
-                      <span className="repo-name">
-                        {codeReview.githubFields
-                          ? `${codeReview.githubFields.repo.organizationName}/${codeReview.githubFields.repo.name}`
-                          : null}
-                      </span>
+                    <td colSpan={5}>
+                      {
+                        codeReviewGroupTypeHeaderDescription[
+                          codeReviewGroup.groupType
+                        ]
+                      }
                     </td>
-                    <td
-                      className={`status status-${codeReviewStatusToString(codeReview.status)}`}
+                  </tr>
+                  {codeReviewGroup.sortedCodeReviews.map((codeReview) => (
+                    <tr
+                      className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-clicked' : ' recently-clicked') : ''}`}
                     >
-                      {codeReview.status ==
-                        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME && (
-                        <>
-                          Snoozed until:{' '}
-                          {timeago.format(
-                            new Date(codeReview.snoozeUntilTimestamp * 1000),
-                            'en',
-                          )}
-                        </>
-                      )}
-
-                      {codeReview.status ==
-                        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
-                        <>
-                          Snoozed until update (last update was{' '}
-                          {timeago.format(
-                            new Date(
-                              codeReview.snoozeUntilUpdatedAtChangedFrom * 1000,
-                            ),
-                            'en',
-                          )}
-                          )
-                        </>
-                      )}
-
-                      {codeReview.status !=
-                        CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
-                        codeReview.status !=
-                          CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE &&
-                        codeReviewStatusToString(codeReview.status)}
-                    </td>
-                    <td className="github-status">
-                      {codeReview.githubFields
-                        ? gitHubPullRequestStatusToString(
-                            codeReview.githubFields.status,
-                          )
-                        : ''}
-                    </td>
-                    <td>
-                      <a
-                        href={codeReview.githubFields?.url || ''}
-                        className="pr-link"
-                        target="_blank"
-                        rel="noopener"
-                        onClick={() => this.uncache(codeReview.id)}
+                      <td>
+                        <span className="repo-name">
+                          {codeReview.githubFields
+                            ? `${codeReview.githubFields.repo.organizationName}/${codeReview.githubFields.repo.name}`
+                            : null}
+                        </span>
+                      </td>
+                      <td
+                        className={`status status-${codeReviewStatusToString(codeReview.status)}`}
                       >
-                        {codeReview.githubFields?.title || ''}
-                      </a>
+                        {codeReview.status ==
+                          CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME && (
+                          <>
+                            Snoozed until:{' '}
+                            {timeago.format(
+                              new Date(codeReview.snoozeUntilTimestamp * 1000),
+                              'en',
+                            )}
+                          </>
+                        )}
 
-                      <div className="actions">
+                        {codeReview.status ==
+                          CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
+                          <>
+                            Snoozed until update (last update was{' '}
+                            {timeago.format(
+                              new Date(
+                                codeReview.snoozeUntilUpdatedAtChangedFrom *
+                                  1000,
+                              ),
+                              'en',
+                            )}
+                            )
+                          </>
+                        )}
+
                         {codeReview.status !=
                           CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
                           codeReview.status !=
-                            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
-                            <>
+                            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE &&
+                          codeReviewStatusToString(codeReview.status)}
+                      </td>
+                      <td className="github-status">
+                        {codeReview.githubFields
+                          ? gitHubPullRequestStatusToString(
+                              codeReview.githubFields.status,
+                            )
+                          : ''}
+                      </td>
+                      <td>
+                        <a
+                          href={codeReview.githubFields?.url || ''}
+                          className="pr-link"
+                          target="_blank"
+                          rel="noopener"
+                          onClick={() => this.uncache(codeReview.id)}
+                        >
+                          {codeReview.githubFields?.title || ''}
+                        </a>
+
+                        <div className="actions">
+                          {codeReview.status !=
+                            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
+                            codeReview.status !=
+                              CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
+                              <>
+                                <button
+                                  onClick={(event) =>
+                                    // TODO Offer choice of how long to snooze
+                                    this.onSnoozeUntilTime(
+                                      event,
+                                      codeReview.id,
+                                      86400,
+                                    )
+                                  }
+                                >
+                                  Snooze for 1 day
+                                </button>
+                                <button
+                                  onClick={(event) =>
+                                    this.onSnoozeUntilUpdate(
+                                      event,
+                                      codeReview.id,
+                                    )
+                                  }
+                                >
+                                  Snooze until update
+                                </button>
+                              </>
+                            )}
+
+                          {codeReview.status !=
+                            CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW && (
+                            <button
+                              onClick={(event) =>
+                                this.onMarkMustReview(event, codeReview.id)
+                              }
+                            >
+                              Mark 'must review'
+                            </button>
+                          )}
+
+                          {codeReview.githubFields?.status !=
+                            GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED &&
+                            codeReview.githubFields?.status !=
+                              GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED &&
+                            codeReview.status !=
+                              CodeReviewStatus.CODE_REVIEW_STATUS_MERGED &&
+                            codeReview.status !=
+                              CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED &&
+                            codeReview.status !=
+                              CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE && (
                               <button
+                                className="action-reviewed-delete-on-merge"
                                 onClick={(event) =>
-                                  // TODO Offer choice of how long to snooze
-                                  this.onSnoozeUntilTime(
+                                  this.onReviewedDeleteOnMerge(
                                     event,
                                     codeReview.id,
-                                    86400,
                                   )
                                 }
                               >
-                                Snooze for 1 day
+                                I reviewed or merged; delete once merged
                               </button>
-                              <button
-                                onClick={(event) =>
-                                  this.onSnoozeUntilUpdate(event, codeReview.id)
-                                }
-                              >
-                                Snooze until update
-                              </button>
-                            </>
+                            )}
+
+                          {(codeReview.status ==
+                            CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
+                            codeReview.status ==
+                              CodeReviewStatus.CODE_REVIEW_STATUS_MERGED) && (
+                            <button className="action-delete">Delete</button>
                           )}
 
-                        {codeReview.status !=
-                          CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW && (
-                          <button
-                            onClick={(event) =>
-                              this.onMarkMustReview(event, codeReview.id)
-                            }
-                          >
-                            Mark 'must review'
-                          </button>
-                        )}
-
-                        {codeReview.githubFields?.status !=
-                          GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED &&
-                          codeReview.githubFields?.status !=
-                            GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED &&
-                          codeReview.status !=
-                            CodeReviewStatus.CODE_REVIEW_STATUS_MERGED &&
-                          codeReview.status !=
-                            CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED &&
-                          codeReview.status !=
-                            CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE && (
+                          {!codeReview.renderOnlyFields.authorIsSelf && (
                             <button
-                              className="action-reviewed-delete-on-merge"
                               onClick={(event) =>
-                                this.onReviewedDeleteOnMerge(
+                                this.onSnoozeUntilMentioned(
                                   event,
                                   codeReview.id,
                                 )
                               }
                             >
-                              I reviewed or merged; delete once merged
+                              Snooze until I'm mentioned
+                              <br />
+                              <small>(= someone else reviews)</small>
                             </button>
                           )}
 
-                        {(codeReview.status ==
-                          CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
-                          codeReview.status ==
-                            CodeReviewStatus.CODE_REVIEW_STATUS_MERGED) && (
-                          <button className="action-delete">Delete</button>
-                        )}
-
-                        {!codeReview.renderOnlyFields.authorIsSelf && (
-                          <button
-                            onClick={(event) =>
-                              this.onSnoozeUntilMentioned(event, codeReview.id)
-                            }
-                          >
-                            Snooze until I'm mentioned
-                            <br />
-                            <small>(= someone else reviews)</small>
-                          </button>
-                        )}
-
-                        {this.state.codeReviewIdsWithActiveCommands.has(
-                          codeReview.id,
-                        ) && <Spinner />}
-                      </div>
-                    </td>
-                    <td>
-                      {codeReview.lastUpdatedTimestamp > 0
-                        ? timeago.format(
-                            new Date(codeReview.lastUpdatedTimestamp * 1000),
-                            'en',
-                          )
-                        : null}
-                    </td>
-                  </tr>
-                ),
-              )}
+                          {this.state.codeReviewIdsWithActiveCommands.has(
+                            codeReview.id,
+                          ) && <Spinner />}
+                        </div>
+                      </td>
+                      <td>
+                        {codeReview.lastUpdatedTimestamp > 0
+                          ? timeago.format(
+                              new Date(codeReview.lastUpdatedTimestamp * 1000),
+                              'en',
+                            )
+                          : null}
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              ))}
           </tbody>
         </table>
       </>

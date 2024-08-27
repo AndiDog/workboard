@@ -51,6 +51,70 @@ th {
   font-family: 'DejaVu Sans Mono', monospace;
 }
 
+tr.code-review-group {
+  line-height: 0.8em;
+  font-weight: bold;
+}
+
+tr.code-review-group-type-merged-or-updated {
+  background: repeating-linear-gradient(
+    315deg,
+    #c4f1c4 0,
+    #c4f1c4 1em,
+    #72de6c 1em,
+    #72de6c 2em,
+    #c4f1c4 2em
+  );
+  color: green;
+}
+
+tr.code-review-group-type-must-review {
+  background: repeating-linear-gradient(
+    315deg,
+    #ffffae 0,
+    #ffffae 1em,
+    #f6d30b 1em,
+    #f6d30b 2em,
+    #ffffae 2em
+  );
+  color: #867200;
+}
+
+tr.code-review-group-type-rest {
+  background: repeating-linear-gradient(
+    315deg,
+    white 0,
+    white 1em,
+    #c4f1c4 1em,
+    #c4f1c4 2em,
+    white 2em
+  );
+}
+
+tr.code-review-group-type-reviewed {
+  background: repeating-linear-gradient(
+    315deg,
+    #cbead0 0,
+    #cbead0 1em,
+    #98c19b 1em,
+    #98c19b 2em,
+    #cbead0 2em
+  );
+  color: gray;
+}
+
+tr.code-review-group-type-snoozed {
+  background: repeating-linear-gradient(
+    315deg,
+    #f0f0f0 0,
+    #f0f0f0 1em,
+    #ddd 1em,
+    #ddd 2em,
+    #f0f0f0 2em
+  );
+  color: gray;
+}
+
 td.status {
   /*
    Rather grow vertically to display the status than having the table colum sizes jump from small to large,
