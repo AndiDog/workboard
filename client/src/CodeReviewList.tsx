@@ -405,6 +405,16 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           codeReviewGroup.groupType
                         ]
                       }
+                      <span
+                        title={`${codeReviewGroup.sortedCodeReviews.length} review${
+                          codeReviewGroup.sortedCodeReviews.length == 1
+                            ? ''
+                            : 's'
+                        }`}
+                      >
+                        {' '}
+                        ({codeReviewGroup.sortedCodeReviews.length})
+                      </span>
                     </td>
                   </tr>
                   {codeReviewGroup.sortedCodeReviews.map((codeReview) => (
