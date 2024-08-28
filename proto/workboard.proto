@@ -94,6 +94,10 @@ message MarkMustReviewCommand {
   string code_review_id = 1;
 }
 
+message RefreshReviewCommand {
+  string code_review_id = 1;
+}
+
 message ReviewedDeleteOnMergeCommand {
   string code_review_id = 1;
 }
@@ -116,6 +120,8 @@ service Workboard {
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
 
   rpc MarkMustReview(MarkMustReviewCommand) returns (CommandResponse) {}
+
+  rpc RefreshReview(RefreshReviewCommand) returns (CommandResponse) {}
 
   rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
       returns (CommandResponse) {}

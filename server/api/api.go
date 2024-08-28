@@ -373,6 +373,18 @@ func (s *WorkboardServer) MarkMustReview(ctx context.Context, cmd *proto.MarkMus
 	return &proto.CommandResponse{}, nil
 }
 
+func (s *WorkboardServer) RefreshReview(ctx context.Context, cmd *proto.RefreshReviewCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
+	logger.Info("RefreshReview")
+
+	_, err := s.refreshCodeReview(ctx, cmd.CodeReviewId)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to refresh code review")
+	}
+
+	return &proto.CommandResponse{}, nil
+}
+
 func (s *WorkboardServer) ReviewedDeleteOnMerge(ctx context.Context, cmd *proto.ReviewedDeleteOnMergeCommand) (*proto.CommandResponse, error) {
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("ReviewedDeleteOnMerge")

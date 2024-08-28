@@ -13,6 +13,7 @@ import {
   MarkMustReviewCommand,
   SnoozeUntilTimeCommand,
   CodeReview,
+  RefreshReviewCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -279,6 +280,21 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  onRefresh(event: Event, codeReviewId: string) {
+    event.preventDefault();
+    this.runCommandOnSingleCodeReview(
+      codeReviewId,
+      'refresh',
+      (client, onResult) => {
+        client.RefreshReview(
+          new RefreshReviewCommand({ codeReviewId }),
+          null,
+          onResult,
+        );
+      },
+    );
+  }
+
   onReviewedDeleteOnMerge(event: Event, codeReviewId: string) {
     event.preventDefault();
     this.runCommandOnSingleCodeReview(
@@ -371,10 +387,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
       });
     });
-  }
-
-  uncache(_codeReviewId: string) {
-    // TODO
   }
 
   render() {
@@ -476,7 +488,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           className="pr-link"
                           target="_blank"
                           rel="noopener"
-                          onClick={() => this.uncache(codeReview.id)}
                         >
                           {codeReview.githubFields?.title || ''}
                         </a>
@@ -567,6 +578,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               <small>(= someone else reviews)</small>
                             </button>
                           )}
+
+                          <button
+                            onClick={(event) =>
+                              this.onRefresh(event, codeReview.id)
+                            }
+                          >
+                            Refresh
+                          </button>
 
                           {this.state.codeReviewIdsWithActiveCommands.has(
                             codeReview.id,
