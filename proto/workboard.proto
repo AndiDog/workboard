@@ -31,6 +31,11 @@ message CodeReview {
   // if not known.
   int64 last_updated_timestamp = 9;
 
+  // Code reviews must be kept longer in the database even in "deleted" status,
+  // since a search e.g. on GitHub may find them again (especially, but not
+  // only, once they're reopened).
+  int64 delete_after_timestamp = 10;
+
   // These are only used in case of certain `status` value
   int64 snooze_until_updated_at_changed_from = 6;
   int64 bring_back_to_review_if_not_merged_until_timestamp = 7;

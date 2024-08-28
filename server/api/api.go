@@ -40,7 +40,7 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string) (string, *proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, logger *zap.SugaredLogger) (string, *proto.CodeReview, error) {
 	id := *issue.HTMLURL // PR URL doesn't change and is unique, so use it as ID
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
@@ -50,7 +50,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	case "closed":
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_CLOSED
 	}
-	if issue.PullRequestLinks.MergedAt != nil {
+	if issue.PullRequestLinks.MergedAt != nil && *issue.State == "closed" {
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED
 	}
 
@@ -60,10 +60,8 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	}
 
 	codeReview := &proto.CodeReview{
-		Id:                   id,
-		Status:               proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
-		LastChangedTimestamp: 0,
-		LastUpdatedTimestamp: updatedAtTimestamp,
+		Id:     id,
+		Status: proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
 		GithubFields: &proto.GitHubPullRequestFields{
 			Url:    *issue.HTMLURL,
 			Title:  *issue.Title,
@@ -78,16 +76,59 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
 			AuthorIsSelf: issue.User != nil && issue.User.Name != nil && *issue.User.Name == gitHubUserSelf,
 		},
+		LastChangedTimestamp:                       0,
+		LastUpdatedTimestamp:                       updatedAtTimestamp,
+		SnoozeUntilUpdatedAtChangedFrom:            0,
+		BringBackToReviewIfNotMergedUntilTimestamp: 0,
+		SnoozeUntilTimestamp:                       0,
 	}
-	if existingCodeReview, ok := existingCodeReviews[id]; ok {
-		if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_UNSPECIFIED {
-			codeReview.Status = existingCodeReview.Status
-		}
-		if existingCodeReview.LastChangedTimestamp > codeReview.LastChangedTimestamp {
-			codeReview.LastChangedTimestamp = existingCodeReview.LastChangedTimestamp
-		}
-	} else {
+	existingCodeReview, hasExistingCodeReview := existingCodeReviews[id]
+	if !hasExistingCodeReview {
 		codeReview.LastChangedTimestamp = issue.UpdatedAt.Time.Unix()
+
+		return id, codeReview, nil
+	}
+
+	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_UNSPECIFIED {
+		codeReview.Status = existingCodeReview.Status
+	}
+	if existingCodeReview.LastChangedTimestamp > codeReview.LastChangedTimestamp {
+		codeReview.LastChangedTimestamp = existingCodeReview.LastChangedTimestamp
+	}
+
+	codeReview.SnoozeUntilUpdatedAtChangedFrom = existingCodeReview.SnoozeUntilUpdatedAtChangedFrom
+	codeReview.BringBackToReviewIfNotMergedUntilTimestamp = existingCodeReview.BringBackToReviewIfNotMergedUntilTimestamp
+	codeReview.SnoozeUntilTimestamp = existingCodeReview.SnoozeUntilTimestamp
+
+	//
+	// State machine, the smart part of the application :)
+	//
+
+	updateLastChangedToNow := false
+
+	if (existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED && existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED) &&
+		gitHubPullRequestStatus == proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED {
+		if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE {
+			logger.Info("Marking code review as deleted because it was merged")
+			codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED
+			codeReview.DeleteAfterTimestamp = time.Now().Unix() + 86400*30
+		} else {
+			logger.Info("Marking code review as merged")
+			codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED
+		}
+		updateLastChangedToNow = true
+	}
+
+	if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && updatedAtTimestamp != existingCodeReview.SnoozeUntilUpdatedAtChangedFrom {
+		logger.Infow("Snoozed code review was updated in GitHub PR, unsnoozing it", "snoozeUntilUpdatedAtChangedFrom", existingCodeReview.SnoozeUntilUpdatedAtChangedFrom, "updatedAtTimestamp", updatedAtTimestamp)
+
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE
+		updateLastChangedToNow = true
+		codeReview.SnoozeUntilUpdatedAtChangedFrom = 0
+	}
+
+	if updateLastChangedToNow {
+		codeReview.LastChangedTimestamp = time.Now().Unix()
 	}
 
 	return id, codeReview, nil
@@ -227,7 +268,7 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 		}
 		logger.Debug("Queried GitHub PR")
 
-		id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser)
+		id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -330,7 +371,7 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 	if err != nil {
 		return nil, err
 	}
-	id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, codeReview.GithubFields.Repo.OrganizationName, codeReview.GithubFields.Repo.Name, codeReviews, gitHubUser)
+	id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, codeReview.GithubFields.Repo.OrganizationName, codeReview.GithubFields.Repo.Name, codeReviews, gitHubUser, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -377,9 +418,15 @@ func (s *WorkboardServer) RefreshReview(ctx context.Context, cmd *proto.RefreshR
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("RefreshReview")
 
-	_, err := s.refreshCodeReview(ctx, cmd.CodeReviewId)
+	codeReview, err := s.refreshCodeReview(ctx, cmd.CodeReviewId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to refresh code review")
+	}
+
+	// Code review may have changed by the state machine
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to store refreshed code review")
 	}
 
 	return &proto.CommandResponse{}, nil
