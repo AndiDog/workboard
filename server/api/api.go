@@ -105,13 +105,15 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	//
 
 	updateLastChangedToNow := false
+	nowTimestamp := time.Now().Unix()
 
-	if (existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED && existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED) &&
+	if (existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED &&
+		existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED) &&
 		gitHubPullRequestStatus == proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED {
 		if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE {
 			logger.Info("Marking code review as deleted because it was merged")
 			codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED
-			codeReview.DeleteAfterTimestamp = time.Now().Unix() + 86400*30
+			codeReview.DeleteAfterTimestamp = nowTimestamp + 86400*30
 		} else {
 			logger.Info("Marking code review as merged")
 			codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED
@@ -119,7 +121,31 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		updateLastChangedToNow = true
 	}
 
-	if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && updatedAtTimestamp != existingCodeReview.SnoozeUntilUpdatedAtChangedFrom {
+	if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE &&
+		existingCodeReview.BringBackToReviewIfNotMergedUntilTimestamp <= nowTimestamp {
+		logger.Info("Passed the time until code review was meant to be merged, marking as must-review again")
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_MUST_REVIEW
+		updateLastChangedToNow = true
+		codeReview.BringBackToReviewIfNotMergedUntilTimestamp = 0
+	}
+
+	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED &&
+		existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_CLOSED &&
+		gitHubPullRequestStatus == proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_CLOSED {
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_CLOSED
+		updateLastChangedToNow = true
+	}
+
+	if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
+		existingCodeReview.SnoozeUntilTimestamp <= nowTimestamp {
+		logger.Info("Passed the time until code review was snoozed, unsnoozing it")
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_MUST_REVIEW
+		updateLastChangedToNow = true
+		codeReview.SnoozeUntilTimestamp = 0
+	}
+
+	if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE &&
+		updatedAtTimestamp != existingCodeReview.SnoozeUntilUpdatedAtChangedFrom {
 		logger.Infow("Snoozed code review was updated in GitHub PR, unsnoozing it", "snoozeUntilUpdatedAtChangedFrom", existingCodeReview.SnoozeUntilUpdatedAtChangedFrom, "updatedAtTimestamp", updatedAtTimestamp)
 
 		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE
@@ -128,7 +154,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	}
 
 	if updateLastChangedToNow {
-		codeReview.LastChangedTimestamp = time.Now().Unix()
+		codeReview.LastChangedTimestamp = nowTimestamp
 	}
 
 	return id, codeReview, nil
