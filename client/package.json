@@ -14,6 +14,7 @@
     "google-protobuf": "^3.21.2",
     "grpc-web": "^1.5.0",
     "preact": "^10.22.1",
+    "safecolor": "^1.0.1",
     "timeago.js": "^4.0.2"
   },
   "devDependencies": {

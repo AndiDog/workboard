@@ -73,3 +73,7 @@ make client-watch
 The software is free to use. The code may be used freely, except for the creation of, or integration into, commercial products (in short: I don't want GitHub or other platforms to steal my idea without appropriate compensation).
 
 A clearer legal license text may be added later.
+
+The following libraries are used, thank you to the authors!
+
+- [SafeColor](https://github.com/jessuni/SafeColor) ([MIT license](./client/src/vendor/safecolor/LICENSE))

@@ -1,4 +1,5 @@
 import { Component } from 'preact';
+import SafeColor from './vendor/safecolor/safecolor';
 import * as timeago from 'timeago.js';
 import {
   WorkboardClient,
@@ -20,6 +21,8 @@ import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
 import { RpcError } from 'grpc-web';
 import ErrorBanner from './ErrorBanner';
+
+const safeColor = new SafeColor({ color: [255, 255, 255], contrast: 3 });
 
 type CodeReviewListState = {
   codeReviewGroups?: CodeReviewGroup[];
@@ -545,7 +548,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                 )
                               : ''}
                           </td>
-                          <td>
+                          <td
+                            style={`background-color: rgba${safeColor.random(codeReview.id).substring(3).replace(')', ', 0.1)')}`}
+                          >
                             {codeReview.renderOnlyFields.avatarUrl.length >
                               0 && (
                               <img
@@ -559,6 +564,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               className="pr-link"
                               target="_blank"
                               rel="noopener"
+                              style={`color: ${safeColor.random(codeReview.id)}`}
                             >
                               {codeReview.githubFields?.title || ''}
                             </a>

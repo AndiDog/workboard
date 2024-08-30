@@ -44,12 +44,11 @@ th {
 
 .pr-link,
 .pr-link:visited {
-  color: #500;
+  /* Text color is set using safecolor */
   font-weight: 600;
   text-decoration: none;
 }
 .pr-link:hover {
-  color: #f30;
   text-decoration: underline;
 }
 
