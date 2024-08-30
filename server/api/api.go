@@ -298,7 +298,18 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 
 	client := s.ensureGitHubClient()
 
-	for _, query := range []string{fmt.Sprintf(`author:"%s" is:pr is:open`, gitHubUser)} {
+	alreadyUpdatedGithubPrUrls := map[string]bool{}
+
+	for _, query := range []string{
+		// Own PRs
+		fmt.Sprintf(`author:"%s" is:pr is:open`, gitHubUser),
+		// Assigned PRs
+		fmt.Sprintf(`assignee:"%s" is:pr is:open`, gitHubUser),
+		// Reviewed-requested PRs
+		fmt.Sprintf(`review-requested:"%s" is:pr is:open`, gitHubUser),
+		// Reviewed-by PRs
+		fmt.Sprintf(`reviewed-by:"%s" is:pr is:open`, gitHubUser),
+	} {
 		logger = logger.With("query", query)
 		logger.Debug("Querying GitHub PRs")
 
@@ -322,6 +333,10 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 		}
 
 		for _, issue := range res.Issues {
+			if _, ok := alreadyUpdatedGithubPrUrls[*issue.HTMLURL]; ok {
+				continue
+			}
+
 			var owner, repo string
 			owner, repo, err = getOwnerAndRepoFromGitHubIssue(issue, logger)
 			if err != nil {
@@ -344,6 +359,8 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 				break
 			}
 			codeReviews[id] = codeReview
+
+			alreadyUpdatedGithubPrUrls[*issue.HTMLURL] = true
 		}
 
 		if err != nil {
