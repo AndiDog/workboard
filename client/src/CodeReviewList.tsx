@@ -213,23 +213,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   componentDidMount() {
-    this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
-      let client = new WorkboardClient('https://localhost:16667');
-
-      const thiz = this;
-      client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
-        let codeReviewGroups: CodeReviewGroup[] | undefined =
-          thiz.state.codeReviewGroups;
-        if (res !== null) {
-          codeReviewGroups = sortCodeReviews(res);
-        }
-
-        thiz.setState({
-          codeReviewGroups,
-          codeReviewsGrpcResult: toGrpcResult(error, res),
-        });
-      });
-    });
+    this.refresh(new GetCodeReviewsQuery());
   }
 
   runCommandOnSingleCodeReview(
@@ -314,6 +298,16 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           onResult,
         );
       },
+    );
+  }
+
+  onRefreshAll(event: Event) {
+    event.preventDefault();
+
+    this.refresh(
+      new GetCodeReviewsQuery({
+        forceRefresh: true,
+      }),
     );
   }
 
@@ -411,6 +405,26 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     });
   }
 
+  refresh(query: GetCodeReviewsQuery) {
+    const thiz = this;
+    this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
+      let client = new WorkboardClient('https://localhost:16667');
+
+      client.GetCodeReviews(query, null, (error, res) => {
+        let codeReviewGroups: CodeReviewGroup[] | undefined =
+          thiz.state.codeReviewGroups;
+        if (res !== null) {
+          codeReviewGroups = sortCodeReviews(res);
+        }
+
+        this.setState({
+          codeReviewGroups,
+          codeReviewsGrpcResult: toGrpcResult(error, res),
+        });
+      });
+    });
+  }
+
   render() {
     const nowTimestamp = Date.now() / 1000;
 
@@ -422,7 +436,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               <th>Repo</th>
               <th>Your status</th>
               <th>GitHub state</th>
-              <th>Actions</th>
+              <th>
+                Actions
+                <div className="global-code-reviews-actions">
+                  <button onClick={(event) => this.onRefreshAll(event)}>
+                    Refresh all
+                  </button>
+                </div>
+              </th>
               <th>Last updated</th>
             </tr>
           </thead>

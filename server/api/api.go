@@ -384,21 +384,27 @@ func (s *WorkboardServer) storeCodeReview(codeReview *proto.CodeReview) error {
 	return nil
 }
 
-func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCodeReviewsQuery) (*proto.GetCodeReviewsResponse, error) {
+func (s *WorkboardServer) GetCodeReviews(ctx context.Context, query *proto.GetCodeReviewsQuery) (*proto.GetCodeReviewsResponse, error) {
 	logger := s.logger
 	logger.Info("GetCodeReviews")
 
 	var lastCodeReviewsRefresh int64 = 0
-	_, err := s.db.Get("last_code_reviews_refresh", &lastCodeReviewsRefresh)
-	if err != nil {
-		logger.Errorw("Failed to read code reviews from database", "err", err)
-		return nil, err
+	var err error
+
+	if !query.ForceRefresh {
+		_, err = s.db.Get("last_code_reviews_refresh", &lastCodeReviewsRefresh)
+		if err != nil {
+			logger.Errorw("Failed to read code reviews from database", "err", err)
+			return nil, err
+		}
 	}
 	nowTimestamp := time.Now().Unix()
 	var codeReviews map[string]*proto.CodeReview
-	if lastCodeReviewsRefresh < nowTimestamp && nowTimestamp-lastCodeReviewsRefresh > 3600 {
-		if lastCodeReviewsRefresh == 0 {
-			logger.Debugw("No code reviews refresh known in database, triggering refresh")
+	if query.ForceRefresh || (lastCodeReviewsRefresh < nowTimestamp && nowTimestamp-lastCodeReviewsRefresh > 3600) {
+		if query.ForceRefresh {
+			logger.Debug("Forced code reviews refresh")
+		} else if lastCodeReviewsRefresh == 0 {
+			logger.Debug("No code reviews refresh known in database, triggering refresh")
 		} else {
 			logger.Debugw("Last code reviews refresh was long ago, triggering refresh", "secondsAgo", nowTimestamp-lastCodeReviewsRefresh)
 		}
@@ -414,13 +420,13 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCode
 			return nil, err
 		}
 	} else {
-		logger.Debugw("Last code reviews refresh is recent, returning cached code reviews without refresh")
+		logger.Debug("Last code reviews refresh is recent, returning cached code reviews without refresh")
 		codeReviews, err = s.getCodeReviews()
 
-	if err != nil {
+		if err != nil {
 			logger.Errorw("Failed to get code reviews", "err", err)
-		return nil, err
-	}
+			return nil, err
+		}
 	}
 
 	res := &proto.GetCodeReviewsResponse{}

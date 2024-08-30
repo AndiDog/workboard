@@ -85,7 +85,11 @@ message GitHubRepo {
 
 // QUERIES
 
-message GetCodeReviewsQuery {}
+message GetCodeReviewsQuery {
+  // Only meant for human-triggered "Refresh all" button clicks, as this can
+  // make lots of requests to APIs like GitHub's
+  bool force_refresh = 1;
+}
 
 message GetCodeReviewsResponse {
   repeated CodeReview code_reviews = 1;
