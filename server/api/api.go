@@ -246,6 +246,9 @@ func (s *WorkboardServer) getCodeReviews() (map[string]*proto.CodeReview, error)
 func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*proto.CodeReview, error) {
 	logger := s.logger
 
+	// Used for the whole function incl. loop bodies (see hints below)
+	var err error
+
 	codeReviews := map[string]*proto.CodeReview{}
 	ok, err := s.db.Get("code_reviews", &codeReviews)
 	if err != nil {
@@ -260,52 +263,78 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 		return nil, err
 	}
 	logger = logger.With("gitHubUser", gitHubUser)
+	logger.Info("Refreshing code reviews")
 
 	client := s.ensureGitHubClient()
-	query := fmt.Sprintf(`author:"%s" is:pr is:open`, gitHubUser)
-	logger = logger.With("query", query)
-	logger.Debug("Querying GitHub PRs")
-	res, _, err := client.Search.Issues(ctx, query, &github.SearchOptions{
-		// Not needed, but make things idempotent
-		Sort:  "created",
-		Order: "desc",
-		ListOptions: github.ListOptions{
-			// TODO paging
-			Page:    1,
-			PerPage: 100,
-		},
-	})
-	logger.Debug("Queried GitHub PRs")
+
+	for _, query := range []string{fmt.Sprintf(`author:"%s" is:pr is:open`, gitHubUser)} {
+		logger = logger.With("query", query)
+		logger.Debug("Querying GitHub PRs")
+
+		// Don't use `err :=` in this loop since we want to break out of the loop and store the current
+		// state on errors, requiring the outside `err` variable to be used.
+		var res *github.IssuesSearchResult
+		res, _, err = client.Search.Issues(ctx, query, &github.SearchOptions{
+			// Not needed, but make things idempotent
+			Sort:  "created",
+			Order: "desc",
+			ListOptions: github.ListOptions{
+				// TODO paging
+				Page:    1,
+				PerPage: 100,
+			},
+		})
+		logger.Debug("Queried GitHub PRs")
+		if err != nil {
+			err = errors.Wrapf(err, "failed to search GitHub PRs for user %q", gitHubUser)
+			break
+		}
+
+		for _, issue := range res.Issues {
+			var owner, repo string
+			owner, repo, err = getOwnerAndRepoFromGitHubIssue(issue, logger)
+			if err != nil {
+				break
+			}
+			logger := logger.With("url", *issue.HTMLURL)
+			logger.Debug("Querying GitHub PR")
+			var pr *github.PullRequest
+			pr, _, err = client.PullRequests.Get(ctx, owner, repo, *issue.Number)
+			if err != nil {
+				err = errors.Wrap(err, "failed to fetch GitHub PR details for reviews refresh")
+				break
+			}
+			logger.Debug("Queried GitHub PR")
+
+			var id string
+			var codeReview *proto.CodeReview
+			id, codeReview, err = convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser, logger)
+			if err != nil {
+				break
+			}
+			codeReviews[id] = codeReview
+		}
+
+		if err != nil {
+			break
+		}
+	}
+
+	logger.Debug("Storing refreshed code reviews")
+	storeErr := s.db.Set("code_reviews", &codeReviews)
+	if storeErr != nil {
+		if err == nil {
+			return nil, errors.Wrap(storeErr, "failed to store code reviews in database")
+		} else {
+			logger.Errorw("Failed to store code reviews in database", "err", storeErr)
+		}
+	}
+
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to search GitHub PRs for user %q", gitHubUser)
+		return nil, err
 	}
 
-	for _, issue := range res.Issues {
-		owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
-		if err != nil {
-			return nil, err
-		}
-		logger := logger.With("url", *issue.HTMLURL)
-		logger.Debug("Querying GitHub PR")
-		pr, _, err := client.PullRequests.Get(ctx, owner, repo, *issue.Number)
-		if err != nil {
-			logger.Errorw("Failed to fetch GitHub PR details for reviews refresh", "err", err)
-			return nil, errors.Wrap(err, "failed to fetch GitHub PR details for reviews refresh")
-		}
-		logger.Debug("Queried GitHub PR")
-
-		id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser, logger)
-		if err != nil {
-			return nil, err
-		}
-		codeReviews[id] = codeReview
-	}
-
-	err = s.db.Set("code_reviews", &codeReviews)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to store code reviews in database")
-	}
-
+	logger.Info("Refreshed code reviews")
 	return codeReviews, nil
 }
 
@@ -331,6 +360,7 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCode
 	var lastCodeReviewsRefresh int64 = 0
 	_, err := s.db.Get("last_code_reviews_refresh", &lastCodeReviewsRefresh)
 	if err != nil {
+		logger.Errorw("Failed to read code reviews from database", "err", err)
 		return nil, err
 	}
 	nowTimestamp := time.Now().Unix()
@@ -342,16 +372,24 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, cmd *proto.GetCode
 			logger.Debugw("Last code reviews refresh was long ago, triggering refresh", "secondsAgo", nowTimestamp-lastCodeReviewsRefresh)
 		}
 		codeReviews, err = s.refreshCodeReviews(ctx)
+		if err != nil {
+			logger.Errorw("Failed to refresh code reviews", "err", err)
+			return nil, err
+		}
+
+		err = s.db.Set("last_code_reviews_refresh", &nowTimestamp)
+		if err != nil {
+			logger.Errorw("Failed to store last code reviews refresh in database", "err", err)
+			return nil, err
+		}
 	} else {
 		logger.Debugw("Last code reviews refresh is recent, returning cached code reviews without refresh")
 		codeReviews, err = s.getCodeReviews()
-	}
+
 	if err != nil {
+			logger.Errorw("Failed to get code reviews", "err", err)
 		return nil, err
 	}
-	err = s.db.Set("last_code_reviews_refresh", &nowTimestamp)
-	if err != nil {
-		return nil, err
 	}
 
 	res := &proto.GetCodeReviewsResponse{}
