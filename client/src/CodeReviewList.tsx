@@ -341,12 +341,20 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
-  onSnoozeUntilTime(
-    event: Event,
-    codeReviewId: string,
-    secondsFromNow: number,
-  ) {
+  onSnoozeUntilTime(event: Event, codeReviewId: string) {
     event.preventDefault();
+
+    const select = event.currentTarget as HTMLSelectElement;
+    let secondsFromNow = 0;
+    for (const option of select.selectedOptions) {
+      secondsFromNow = parseInt(option.value, 10);
+      break;
+    }
+    if (secondsFromNow <= 0) {
+      throw new Error('Failed to get snooze time from select element');
+    }
+    select.selectedIndex = 0;
+
     this.runCommandOnSingleCodeReview(
       codeReviewId,
       'snooze until time',
@@ -553,18 +561,20 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                 codeReview.status !=
                                   CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
                                   <>
-                                    <button
-                                      onClick={(event) =>
-                                        // TODO Offer choice of how long to snooze
+                                    <select
+                                      onChange={(event) =>
                                         this.onSnoozeUntilTime(
                                           event,
                                           codeReview.id,
-                                          86400,
                                         )
                                       }
                                     >
-                                      Snooze for 1 day
-                                    </button>
+                                      <option value="">Snooze for…</option>
+                                      <option value="3600">1 hour</option>
+                                      <option value="86400">1 day</option>
+                                      <option value="604800">7 days</option>
+                                      <option value="1209600">14 days</option>
+                                    </select>
                                     <button
                                       onClick={(event) =>
                                         this.onSnoozeUntilUpdate(

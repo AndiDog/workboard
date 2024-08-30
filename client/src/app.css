@@ -180,7 +180,8 @@ td.status-updated-after-snooze {
   margin-top: 0.5em;
 }
 
-.actions button {
+.actions button,
+.actions select {
   margin-right: 0.75em;
   border: 1px solid #ccc;
   background-color: #f6f6f6;
