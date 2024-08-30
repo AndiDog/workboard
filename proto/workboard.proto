@@ -10,6 +10,9 @@ message CodeReviewRenderOnlyFields {
   // itself. For example, `author_is_self` depends for which user the code
   // reviews are listed.
   bool author_is_self = 1;
+
+  // Can be empty
+  string avatar_url = 2;
 }
 
 // Pull/merge request on a platform like GitHub

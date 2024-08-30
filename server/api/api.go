@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v63/github"
@@ -42,7 +43,7 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, logger *zap.SugaredLogger) (string, *proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, avatarUrl string, logger *zap.SugaredLogger) (string, *proto.CodeReview, error) {
 	id := *issue.HTMLURL // PR URL doesn't change and is unique, so use it as ID
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
@@ -75,9 +76,13 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 			Status:             gitHubPullRequestStatus,
 			UpdatedAtTimestamp: updatedAtTimestamp,
 		},
+
+		// TODO Rather only fill these at render time, which was the purpose of the field
 		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
 			AuthorIsSelf: issue.User != nil && issue.User.Name != nil && *issue.User.Name == gitHubUserSelf,
+			AvatarUrl:    avatarUrl,
 		},
+
 		LastChangedTimestamp:                       0,
 		LastUpdatedTimestamp:                       updatedAtTimestamp,
 		SnoozeUntilUpdatedAtChangedFrom:            0,
@@ -177,6 +182,40 @@ func getOwnerAndRepoFromGitHubIssue(issue *github.Issue, logger *zap.SugaredLogg
 
 func sugarLoggerWithGitHubPullRequestFields(logger *zap.SugaredLogger, gitHubFields *proto.GitHubPullRequestFields) *zap.SugaredLogger {
 	return logger.With("gitHubPullRequestUrl", gitHubFields.Url)
+}
+
+func githubUserAvatarUrlDatabaseKey(user *github.User) string {
+	return fmt.Sprintf("github_user_avatar_url.%s", *user.Login)
+}
+
+// conditionallyStoreUserAvatarUrl returns the avatar URL, or empty string if none given or an error happened
+func (s *WorkboardServer) conditionallyStoreUserAvatarUrl(user *github.User) string {
+	logger := s.logger.With("gitHubUserLogin", *user.Login)
+
+	if user.AvatarURL == nil {
+		logger.Debug("No avatar URL")
+		return ""
+	}
+
+	if strings.HasPrefix(*user.AvatarURL, "https://avatars.githubusercontent.com/in/") {
+		// GitHub automatically creates block-shaped avatars. They don't provide much meaning, so we don't clutter
+		// the code reviews listing with them.
+		logger.Debugw("Avatar URL is auto-generated, not storing it", "avatarUrl", *user.AvatarURL)
+		return ""
+	}
+
+	if !strings.HasPrefix(*user.AvatarURL, "https://avatars.githubusercontent.com/u/") {
+		logger.Debugw("Untrusted avatar URL", "avatarUrl", *user.AvatarURL)
+		return ""
+	}
+
+	err := s.db.Set(githubUserAvatarUrlDatabaseKey(user), *user.AvatarURL)
+	if err != nil {
+		logger.Errorw("Failed to write avatar URL into database", "err", err)
+		return ""
+	}
+
+	return *user.AvatarURL
 }
 
 func (s *WorkboardServer) DeleteReview(ctx context.Context, cmd *proto.DeleteReviewCommand) (*proto.CommandResponse, error) {
@@ -352,9 +391,11 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 			}
 			logger.Debug("Queried GitHub PR")
 
+			avatarUrl := s.conditionallyStoreUserAvatarUrl(pr.User)
+
 			var id string
 			var codeReview *proto.CodeReview
-			id, codeReview, err = convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser, logger)
+			id, codeReview, err = convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser, avatarUrl, logger)
 			if err != nil {
 				break
 			}
@@ -485,11 +526,13 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 		return nil, errors.Wrap(err, "failed to fetch GitHub PR details for review refresh")
 	}
 
+	avatarUrl := s.conditionallyStoreUserAvatarUrl(pr.User)
+
 	codeReviews, err := s.getCodeReviews()
 	if err != nil {
 		return nil, err
 	}
-	id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, codeReview.GithubFields.Repo.OrganizationName, codeReview.GithubFields.Repo.Name, codeReviews, gitHubUser, logger)
+	id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, codeReview.GithubFields.Repo.OrganizationName, codeReview.GithubFields.Repo.Name, codeReviews, gitHubUser, avatarUrl, logger)
 	if err != nil {
 		return nil, err
 	}

@@ -546,6 +546,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               : ''}
                           </td>
                           <td>
+                            {codeReview.renderOnlyFields.avatarUrl.length >
+                              0 && (
+                              <img
+                                className="code-review-avatar"
+                                src={codeReview.renderOnlyFields.avatarUrl}
+                              />
+                            )}
+
                             <a
                               href={codeReview.githubFields?.url || ''}
                               className="pr-link"
