@@ -95,6 +95,10 @@ message GetCodeReviewsResponse {
 
 message CommandResponse {}
 
+message DeleteReviewCommand {
+  string code_review_id = 1;
+}
+
 message MarkMustReviewCommand {
   string code_review_id = 1;
 }
@@ -122,6 +126,8 @@ message SnoozeUntilUpdateCommand {
 }
 
 service Workboard {
+  rpc DeleteReview(DeleteReviewCommand) returns (CommandResponse) {}
+
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
 
   rpc MarkMustReview(MarkMustReviewCommand) returns (CommandResponse) {}

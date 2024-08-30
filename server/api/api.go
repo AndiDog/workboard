@@ -15,6 +15,8 @@ import (
 	"andidog.de/workboard/server/proto"
 )
 
+const deleteAfterNowSeconds = 86400 * 30
+
 type WorkboardServer struct {
 	proto.UnimplementedWorkboardServer
 
@@ -113,7 +115,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE {
 			logger.Info("Marking code review as deleted because it was merged")
 			codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED
-			codeReview.DeleteAfterTimestamp = nowTimestamp + 86400*30
+			codeReview.DeleteAfterTimestamp = nowTimestamp + deleteAfterNowSeconds
 		} else {
 			logger.Info("Marking code review as merged")
 			codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED
@@ -175,6 +177,35 @@ func getOwnerAndRepoFromGitHubIssue(issue *github.Issue, logger *zap.SugaredLogg
 
 func sugarLoggerWithGitHubPullRequestFields(logger *zap.SugaredLogger, gitHubFields *proto.GitHubPullRequestFields) *zap.SugaredLogger {
 	return logger.With("gitHubPullRequestUrl", gitHubFields.Url)
+}
+
+func (s *WorkboardServer) DeleteReview(ctx context.Context, cmd *proto.DeleteReviewCommand) (*proto.CommandResponse, error) {
+	logger := s.logger
+	logger.Info("DeleteReview")
+
+	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
+	if err != nil {
+		logger.Errorw("Failed to get code review in order to delete it", "err", err)
+		return nil, errors.Wrap(err, "failed to get code review in order to delete it")
+	}
+
+	logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
+
+	codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED
+	nowTimestamp := time.Now().Unix()
+	codeReview.LastChangedTimestamp = nowTimestamp
+	codeReview.DeleteAfterTimestamp = nowTimestamp + deleteAfterNowSeconds
+
+	logger.Info(
+		"Marked code review as deleted")
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		logger.Errorw("Failed to store deleted code review", "err", err)
+		return nil, errors.Wrap(err, "failed to store deleted code review")
+	}
+
+	return &proto.CommandResponse{}, nil
 }
 
 func (s *WorkboardServer) ensureGitHubClient() *github.Client {
