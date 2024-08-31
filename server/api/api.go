@@ -180,6 +180,30 @@ func getOwnerAndRepoFromGitHubIssue(issue *github.Issue, logger *zap.SugaredLogg
 	return owner, repo, nil
 }
 
+func paginateGitHubResults(perPage int, callback func(listOptions *github.ListOptions) (*github.Response, error)) error {
+	if perPage <= 0 {
+		panic("Logic error (perPage)")
+	}
+
+	listOptions := github.ListOptions{
+		PerPage: perPage,
+	}
+
+	for {
+		res, err := callback(&listOptions)
+
+		if err != nil {
+			return err
+		}
+
+		if res.NextPage == 0 {
+			return nil
+		}
+
+		listOptions.Page = res.NextPage
+	}
+}
+
 func sugarLoggerWithGitHubPullRequestFields(logger *zap.SugaredLogger, gitHubFields *proto.GitHubPullRequestFields) *zap.SugaredLogger {
 	return logger.With("gitHubPullRequestUrl", gitHubFields.Url)
 }
@@ -354,16 +378,24 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 
 		// Don't use `err :=` in this loop since we want to break out of the loop and store the current
 		// state on errors, requiring the outside `err` variable to be used.
-		var res *github.IssuesSearchResult
-		res, _, err = client.Search.Issues(ctx, query, &github.SearchOptions{
-			// Not needed, but make things idempotent
-			Sort:  "created",
-			Order: "desc",
-			ListOptions: github.ListOptions{
-				// TODO paging
-				Page:    1,
-				PerPage: 100,
-			},
+		var issues []*github.Issue
+		perPage := 1000
+		err = paginateGitHubResults(perPage, func(listOptions *github.ListOptions) (*github.Response, error) {
+			logger.Debug("Querying next GitHub PRs page")
+			issuesRes, gitHubRes, err := client.Search.Issues(ctx, query, &github.SearchOptions{
+				// Idempotent order
+				Sort:        "created",
+				Order:       "desc",
+				ListOptions: *listOptions,
+			})
+
+			if err != nil {
+				return nil, err
+			}
+
+			issues = append(issues, issuesRes.Issues...)
+
+			return gitHubRes, nil
 		})
 		logger.Debug("Queried GitHub PRs")
 		if err != nil {
@@ -371,7 +403,7 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 			break
 		}
 
-		for _, issue := range res.Issues {
+		for _, issue := range issues {
 			if _, ok := alreadyUpdatedGithubPrUrls[*issue.HTMLURL]; ok {
 				continue
 			}
