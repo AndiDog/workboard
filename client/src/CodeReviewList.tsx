@@ -461,9 +461,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           <tbody>
             {this.state.codeReviewsGrpcResult?.pending && <Spinner />}
             {this.state.codeReviewsGrpcResult?.error && (
-              <ErrorBanner
-                error={`Failed to list code reviews: ${this.state.codeReviewsGrpcResult.error.message}`}
-              />
+              <tr>
+                <td colSpan={5}>
+                  <ErrorBanner
+                    error={`Failed to list code reviews: ${this.state.codeReviewsGrpcResult.error.message}`}
+                  />
+                </td>
+              </tr>
             )}
 
             {this.state.codeReviewsGrpcResult?.ok &&
