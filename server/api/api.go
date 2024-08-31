@@ -365,13 +365,13 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 
 	for _, query := range []string{
 		// Own PRs
-		fmt.Sprintf(`author:"%s" is:pr is:open`, gitHubUser),
+		fmt.Sprintf(`author:"%s" is:pr is:open archived:false`, gitHubUser),
 		// Assigned PRs
-		fmt.Sprintf(`assignee:"%s" is:pr is:open`, gitHubUser),
+		fmt.Sprintf(`assignee:"%s" is:pr is:open archived:false`, gitHubUser),
 		// Reviewed-requested PRs
-		fmt.Sprintf(`review-requested:"%s" is:pr is:open`, gitHubUser),
+		fmt.Sprintf(`review-requested:"%s" is:pr is:open archived:false`, gitHubUser),
 		// Reviewed-by PRs
-		fmt.Sprintf(`reviewed-by:"%s" is:pr is:open`, gitHubUser),
+		fmt.Sprintf(`reviewed-by:"%s" is:pr is:open archived:false`, gitHubUser),
 	} {
 		logger = logger.With("query", query)
 		logger.Debug("Querying GitHub PRs")
