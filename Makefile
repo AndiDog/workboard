@@ -2,6 +2,10 @@
 client-lint:
 	cd client && npm run build
 
+.PHONY: client-proto
+client-proto:
+	cd client && npm run proto
+
 .PHONY: client-watch
 client-watch: client-lint
 	cd client && npm run dev
@@ -9,6 +13,11 @@ client-watch: client-lint
 .PHONY: generate-server
 generate-server: proto/workboard.proto server/proto/gen.go
 	cd server && go generate ./...
+
+.PHONY: proto-watch
+proto-watch:
+	ls -1 proto/workboard.proto server/proto/gen.go \
+		| entr -ccr sh -c 'make client-proto generate-server && echo "Successfully regenerated from protobuf"'
 
 .PHONY: server
 server: generate-server server-lint

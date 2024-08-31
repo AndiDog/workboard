@@ -62,6 +62,14 @@ npm install
 make client-watch
 ```
 
+### protobuf
+
+Rather than having to restart the above `make` processes, you can watch protobuf file changes which should automatically rebuild in the above processes.
+
+```sh
+make proto-watch
+```
+
 ## Possible future features
 
 - GitHub issues
