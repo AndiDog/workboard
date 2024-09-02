@@ -819,6 +819,21 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               />
                             )}
 
+                            {codeReview.githubFields?.statusCheckRollupStatus ==
+                              'SUCCESS' && (
+                              <img
+                                className="code-review-pipeline-status"
+                                src="/check-double.svg"
+                              />
+                            )}
+                            {codeReview.githubFields?.statusCheckRollupStatus ==
+                              'FAILURE' && (
+                              <img
+                                className="code-review-pipeline-status"
+                                src="/xmark.svg"
+                              />
+                            )}
+
                             <a
                               href={codeReview.githubFields?.url || ''}
                               className="pr-link"

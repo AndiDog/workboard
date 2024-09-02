@@ -84,5 +84,8 @@ A clearer legal license text may be added later.
 
 The following libraries and resources are used, thank you to the authors!
 
-- [IconDuck icon](https://iconduck.com/icons/304384/code-pull-request) ([CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/deed.en))
+- IconDuck icons ([CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/deed.en))
+
+  - [Dazzle UI Icon Library](https://iconduck.com/sets/dazzle-ui-icon-library)
+
 - [SafeColor](https://github.com/jessuni/SafeColor) ([MIT license](./client/src/vendor/safecolor/LICENSE))

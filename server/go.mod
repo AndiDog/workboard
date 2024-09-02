@@ -8,7 +8,9 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/pkg/errors v0.9.1
 	github.com/rosedblabs/rosedb/v2 v2.3.8
+	github.com/shurcooL/githubv4 v0.0.0-20240727222349-48295856cce7
 	go.uber.org/zap v1.27.0
+	golang.org/x/oauth2 v0.20.0
 	google.golang.org/grpc v1.65.0
 	google.golang.org/protobuf v1.34.1
 )
@@ -24,6 +26,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.0 // indirect
 	github.com/rosedblabs/wal v1.3.8 // indirect
 	github.com/rs/cors v1.7.0 // indirect
+	github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.25.0 // indirect

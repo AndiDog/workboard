@@ -10,7 +10,9 @@ import (
 
 	"github.com/google/go-github/v63/github"
 	"github.com/pkg/errors"
+	"github.com/shurcooL/githubv4"
 	"go.uber.org/zap"
+	"golang.org/x/oauth2"
 
 	"andidog.de/workboard/server/database"
 	"andidog.de/workboard/server/proto"
@@ -24,7 +26,8 @@ type WorkboardServer struct {
 	db     *database.Database
 	logger *zap.SugaredLogger
 
-	gitHubClient *github.Client
+	gitHubClient        *github.Client
+	gitHubGraphQLClient *githubv4.Client
 }
 
 func NewWorkboardServer(db *database.Database, logger *zap.SugaredLogger) (*WorkboardServer, error) {
@@ -43,7 +46,7 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, avatarUrl string, logger *zap.SugaredLogger) (string, *proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, avatarUrl string, statusCheckRollupQueryState string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	id := *issue.HTMLURL // PR URL doesn't change and is unique, so use it as ID
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
@@ -75,8 +78,9 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 				Name:             repo,
 				OrganizationName: owner,
 			},
-			Status:             gitHubPullRequestStatus,
-			UpdatedAtTimestamp: updatedAtTimestamp,
+			Status:                  gitHubPullRequestStatus,
+			StatusCheckRollupStatus: statusCheckRollupQueryState,
+			UpdatedAtTimestamp:      updatedAtTimestamp,
 		},
 
 		// TODO Rather only fill these at render time, which was the purpose of the field
@@ -97,7 +101,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	if !hasExistingCodeReview {
 		codeReview.LastChangedTimestamp = issue.UpdatedAt.Time.Unix()
 
-		return id, codeReview, nil
+		return codeReview, nil
 	}
 
 	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_UNSPECIFIED {
@@ -167,7 +171,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		codeReview.LastChangedTimestamp = nowTimestamp
 	}
 
-	return id, codeReview, nil
+	return codeReview, nil
 }
 
 var gitHubHtmlUrlRe = regexp.MustCompile("^https://github.com/([^/]+)/([^/]+)/pull/[1-9][0-9]*")
@@ -274,7 +278,7 @@ func (s *WorkboardServer) DeleteReview(ctx context.Context, cmd *proto.DeleteRev
 	return &proto.CommandResponse{}, nil
 }
 
-func (s *WorkboardServer) ensureGitHubClient() *github.Client {
+func (s *WorkboardServer) ensureGitHubClient() (*github.Client, *githubv4.Client, error) {
 	logger := s.logger
 	if s.gitHubClient == nil {
 		s.gitHubClient = github.NewClient(nil)
@@ -286,7 +290,82 @@ func (s *WorkboardServer) ensureGitHubClient() *github.Client {
 			logger.Warn("Created GitHub client without token. Rate limits may occur very soon with anonymous access to the GitHub API!")
 		}
 	}
-	return s.gitHubClient
+
+	if s.gitHubGraphQLClient == nil {
+		gitHubToken := os.Getenv("WORKBOARD_GITHUB_TOKEN")
+		if gitHubToken == "" {
+			return nil, nil, errors.New("failed to create GitHub GraphQL API client because it requires a token, please set environment variable WORKBOARD_GITHUB_TOKEN")
+		}
+
+		src := oauth2.StaticTokenSource(
+			&oauth2.Token{AccessToken: gitHubToken},
+		)
+		httpClient := oauth2.NewClient(context.Background(), src)
+
+		s.gitHubGraphQLClient = githubv4.NewClient(httpClient)
+	}
+
+	return s.gitHubClient, s.gitHubGraphQLClient, nil
+}
+
+func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, existingCodeReviews map[string]*proto.CodeReview, gitHubUser string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+	owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	client, graphQLClient, err := s.ensureGitHubClient()
+	if err != nil {
+		return nil, err
+	}
+
+	pr, _, err := client.PullRequests.Get(ctx, owner, repo, *issue.Number)
+	if err != nil {
+		logger.Errorw("Failed to fetch GitHub PR details", "err", err, "url", *issue.HTMLURL)
+		return nil, errors.Wrap(err, "failed to fetch GitHub PR details")
+	}
+
+	var statusCheckRollupQuery struct {
+		Repository struct {
+			PullRequest struct {
+				Commits struct {
+					Nodes []struct {
+						Commit struct {
+							StatusCheckRollup struct {
+								State string
+							}
+						}
+					}
+				} `graphql:"commits(last: 1)"`
+			} `graphql:"pullRequest(number: $number)"`
+		} `graphql:"repository(owner: $owner, name: $name)"`
+	}
+	graphQLContext, cancelGraphQLContext := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelGraphQLContext()
+	err = graphQLClient.Query(graphQLContext, &statusCheckRollupQuery, map[string]interface{}{
+		"owner": githubv4.String(owner),
+		"name":  githubv4.String(repo),
+
+		// `githubv4` only supports int32, so this could overflow. Likely not
+		// problematic since PR numbers are per-repo and don't grow that much.
+		//nolint:gosec
+		"number": githubv4.Int(*issue.Number),
+	})
+	if err != nil {
+		return nil, err
+	}
+	statusCheckRollupQueryState := ""
+	if len(statusCheckRollupQuery.Repository.PullRequest.Commits.Nodes) > 0 {
+		statusCheckRollupQueryState = statusCheckRollupQuery.Repository.PullRequest.Commits.Nodes[0].Commit.StatusCheckRollup.State
+	}
+
+	avatarUrl := s.conditionallyStoreUserAvatarUrl(pr.User)
+
+	codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, existingCodeReviews, gitHubUser, avatarUrl, statusCheckRollupQueryState, logger)
+	if err != nil {
+		return nil, err
+	}
+	return codeReview, nil
 }
 
 func (s *WorkboardServer) getGitHubUser() (string, error) {
@@ -362,7 +441,10 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 	logger = logger.With("gitHubUser", gitHubUser)
 	logger.Info("Refreshing code reviews")
 
-	client := s.ensureGitHubClient()
+	client, _, err := s.ensureGitHubClient()
+	if err != nil {
+		return nil, err
+	}
 
 	alreadyUpdatedGithubPrUrls := map[string]bool{}
 
@@ -411,30 +493,16 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 				continue
 			}
 
-			var owner, repo string
-			owner, repo, err = getOwnerAndRepoFromGitHubIssue(issue, logger)
-			if err != nil {
-				break
-			}
 			logger := logger.With("url", *issue.HTMLURL)
-			logger.Debug("Querying GitHub PR")
-			var pr *github.PullRequest
-			pr, _, err = client.PullRequests.Get(ctx, owner, repo, *issue.Number)
-			if err != nil {
-				err = errors.Wrap(err, "failed to fetch GitHub PR details for reviews refresh")
-				break
-			}
-			logger.Debug("Queried GitHub PR")
-
-			avatarUrl := s.conditionallyStoreUserAvatarUrl(pr.User)
-
-			var id string
+			logger.Debug("Fetching GitHub PR details")
 			var codeReview *proto.CodeReview
-			id, codeReview, err = convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, codeReviews, gitHubUser, avatarUrl, logger)
+			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, codeReviews, gitHubUser, logger)
 			if err != nil {
-				break
+				return nil, errors.Wrap(err, "failed to fetch GitHub PR details for refresh")
 			}
-			codeReviews[id] = codeReview
+			logger.Debug("Fetched GitHub PR details")
+
+			codeReviews[codeReview.Id] = codeReview
 
 			alreadyUpdatedGithubPrUrls[*issue.HTMLURL] = true
 		}
@@ -533,7 +601,7 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 	logger := s.logger.With("codeReviewId", codeReviewId)
 	logger.Info("Refreshing code review")
 
-	codeReview, err := s.getCodeReviewById(codeReviewId)
+	codeReview, err := s.getCodeReviewById(codeReviewId) // variable gets updated below
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +615,10 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 	}
 	logger = logger.With("gitHubUser", gitHubUser)
 
-	client := s.ensureGitHubClient()
+	client, _, err := s.ensureGitHubClient()
+	if err != nil {
+		return nil, err
+	}
 	logger.Debug("Querying GitHub PR")
 	issue, _, err := client.Issues.Get(ctx, codeReview.GithubFields.Repo.OrganizationName, codeReview.GithubFields.Repo.Name, int(codeReview.GithubFields.Number))
 	logger.Debug("Queried GitHub PR")
@@ -555,23 +626,16 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 		return nil, errors.Wrap(err, "failed to get GitHub PR")
 	}
 
-	pr, _, err := client.PullRequests.Get(ctx, codeReview.GithubFields.Repo.OrganizationName, codeReview.GithubFields.Repo.Name, int(codeReview.GithubFields.Number))
-	if err != nil {
-		logger.Errorw("Failed to fetch GitHub PR details for review refresh", "err", err, "url", *issue.HTMLURL)
-		return nil, errors.Wrap(err, "failed to fetch GitHub PR details for review refresh")
-	}
-
-	avatarUrl := s.conditionallyStoreUserAvatarUrl(pr.User)
-
 	codeReviews, err := s.getCodeReviews()
 	if err != nil {
 		return nil, err
 	}
-	id, codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, codeReview.GithubFields.Repo.OrganizationName, codeReview.GithubFields.Repo.Name, codeReviews, gitHubUser, avatarUrl, logger)
+	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, codeReviews, gitHubUser, logger)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to fetch GitHub PR details")
 	}
-	codeReviews[id] = codeReview
+	logger.Debug("Queried details for GitHub PR")
+	codeReviews[codeReview.Id] = codeReview
 	err = s.db.Set("code_reviews", &codeReviews)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to store code reviews in database")
