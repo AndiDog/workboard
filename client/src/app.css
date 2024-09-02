@@ -26,6 +26,15 @@ table.pull-requests tr.very-recently-clicked {
   background-color: #1ecbf3;
 }
 
+.pull-requests thead {
+  position: sticky;
+  top: 0;
+  border-bottom: 2px solid black;
+}
+.pull-requests thead tr {
+  box-shadow: 0 0 0.5em 0 rgba(0, 0, 0, 0.6);
+}
+
 /*
   Fixed width percentages so the table doesn't jump around so much on automatic
   code review refreshes
