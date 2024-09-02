@@ -82,6 +82,7 @@ The software is free to use. The code may be used freely, except for the creatio
 
 A clearer legal license text may be added later.
 
-The following libraries are used, thank you to the authors!
+The following libraries and resources are used, thank you to the authors!
 
+- [IconDuck icon](https://iconduck.com/icons/304384/code-pull-request) ([CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/deed.en))
 - [SafeColor](https://github.com/jessuni/SafeColor) ([MIT license](./client/src/vendor/safecolor/LICENSE))
