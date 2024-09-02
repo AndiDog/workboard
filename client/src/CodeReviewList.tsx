@@ -143,7 +143,8 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
     if (
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
       codeReview.status ==
-        CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE
+        CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE ||
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED
     ) {
       groupType = CodeReviewGroupType.MergedOrUpdated;
     } else if (
