@@ -315,6 +315,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     }
   }
 
+  isDeletable(codeReview: CodeReview): boolean {
+    return (
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED
+    );
+  }
+
   onIntervalBasedRefresh() {
     if (document.hidden || !(this.state.codeReviewsGrpcResult?.ok || false)) {
       return;
@@ -445,6 +453,51 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     }
   }
 
+  runCommandOnManyCodeReviews(
+    codeReviewIds: Array<string>,
+    commandDesc: string,
+    runCommand: (
+      codeReviewId: string,
+      client: WorkboardClient,
+      onResult: (error: RpcError, res: CommandResponse) => void,
+    ) => void,
+  ) {
+    const thiz = this;
+    this.setState(
+      {
+        codeReviewIdsWithActiveCommands: new Set([
+          ...this.state.codeReviewIdsWithActiveCommands,
+          ...codeReviewIds,
+        ]),
+      },
+      () => {
+        let client = new WorkboardClient('https://localhost:16667');
+
+        let numDone = 0;
+
+        for (const codeReviewId of codeReviewIds) {
+          runCommand(codeReviewId, client, (error, res) => {
+            const commandResult = toGrpcResult(error, res);
+            if (!commandResult.ok) {
+              console.error(
+                `Command failed (${commandDesc}): ${commandResult.error}`,
+              );
+
+              // Continue to refresh since that will remove the code review from `codeReviewIdsWithActiveCommands`
+              // and after an error, it's probably a good idea to get the latest data.
+            }
+
+            ++numDone;
+            if (numDone == codeReviewIds.length) {
+              console.debug('Batch action done, getting code reviews list');
+              thiz.refresh();
+            }
+          });
+        }
+      },
+    );
+  }
+
   runCommandOnSingleCodeReview(
     codeReviewId: string,
     commandDesc: string,
@@ -493,6 +546,35 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.DeleteReview(
           new DeleteReviewCommand({ codeReviewId }),
+          null,
+          onResult,
+        );
+      },
+    );
+  }
+
+  onDeleteCodeReviewsWherePossible(event: Event) {
+    event.preventDefault();
+
+    if (!confirm('Really forget about all code reviews that can be deleted?')) {
+      return;
+    }
+
+    const codeReviewIdsToDelete = [];
+    for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
+      for (const codeReview of codeReviewGroup.sortedCodeReviews) {
+        if (this.isDeletable(codeReview)) {
+          codeReviewIdsToDelete.push(codeReview.id);
+        }
+      }
+    }
+
+    this.runCommandOnManyCodeReviews(
+      codeReviewIdsToDelete,
+      'delete review (batch)',
+      (codeReviewId, client, onResult) => {
+        client.DeleteReview(
+          new DeleteReviewCommand({ codeReviewId: codeReviewId }),
           null,
           onResult,
         );
@@ -693,6 +775,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     let numCodeReviews = 0;
     let numSnoozedCodeReviews = 0;
+    let numDeletableCodeReviews = 0;
     for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
       for (const codeReview of codeReviewGroup.sortedCodeReviews) {
         if (codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_DELETED) {
@@ -711,6 +794,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         ) {
           ++numSnoozedCodeReviews;
         }
+
+        if (this.isDeletable(codeReview)) {
+          ++numDeletableCodeReviews;
+        }
       }
     }
 
@@ -728,6 +815,17 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                   <button onClick={(event) => this.onRelist(event)}>
                     Refresh list
                   </button>
+                  {numDeletableCodeReviews > 0 && (
+                    <button
+                      className="action-delete"
+                      onClick={(event) =>
+                        this.onDeleteCodeReviewsWherePossible(event)
+                      }
+                    >
+                      Delete {numDeletableCodeReviews}{' '}
+                      {simplePlural(numDeletableCodeReviews, 'code review')}
+                    </button>
+                  )}
                   <span class="statistics">
                     {numCodeReviews}{' '}
                     {simplePlural(numCodeReviews, 'code review')},{' '}
@@ -943,12 +1041,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                   </button>
                                 )}
 
-                              {(codeReview.status ==
-                                CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
-                                codeReview.status ==
-                                  CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
-                                codeReview.status ==
-                                  CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED) && (
+                              {this.isDeletable(codeReview) && (
                                 <button
                                   className="action-delete"
                                   onClick={(event) =>

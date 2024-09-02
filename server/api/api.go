@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v63/github"
@@ -23,8 +24,9 @@ const deleteAfterNowSeconds = 86400 * 30
 type WorkboardServer struct {
 	proto.UnimplementedWorkboardServer
 
-	db     *database.Database
-	logger *zap.SugaredLogger
+	db      *database.Database
+	dbMutex sync.Mutex
+	logger  *zap.SugaredLogger
 
 	gitHubClient        *github.Client
 	gitHubGraphQLClient *githubv4.Client
@@ -129,10 +131,13 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	// State machine, the smart part of the application :)
 	//
 
+	if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED {
+		return codeReview, nil
+	}
+
 	updateLastChangedToNow := false
 
-	if (existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED &&
-		existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED) &&
+	if (existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED) &&
 		gitHubPullRequestStatus == proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED {
 		if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE {
 			logger.Info("Marking code review as deleted because it was merged")
@@ -153,8 +158,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		codeReview.BringBackToReviewIfNotMergedUntilTimestamp = 0
 	}
 
-	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED &&
-		existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_CLOSED &&
+	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_CLOSED &&
 		gitHubPullRequestStatus == proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_CLOSED {
 		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_CLOSED
 		updateLastChangedToNow = true
@@ -272,6 +276,9 @@ func (s *WorkboardServer) conditionallyStoreUserAvatarUrl(user *github.User) str
 func (s *WorkboardServer) DeleteReview(ctx context.Context, cmd *proto.DeleteReviewCommand) (*proto.CommandResponse, error) {
 	logger := s.logger
 	logger.Info("DeleteReview")
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
 
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
@@ -414,7 +421,8 @@ func (s *WorkboardServer) getGitHubUser() (string, error) {
 	return gitHubUser, nil
 }
 
-// getCodeReviewById returns the code review by ID, or nil if none exists with that ID
+// getCodeReviewById returns the code review by ID, or nil if none exists with that ID.
+// The caller is responsible for locking `dbMutex`.
 func (s *WorkboardServer) getCodeReviewById(codeReviewId string) (*proto.CodeReview, error) {
 	codeReviews, err := s.getCodeReviews()
 	if err != nil {
@@ -424,6 +432,8 @@ func (s *WorkboardServer) getCodeReviewById(codeReviewId string) (*proto.CodeRev
 	return codeReviews[codeReviewId], nil
 }
 
+// getCodeReviews reads the list of code reviews from the database.
+// The caller is responsible for locking `dbMutex`.
 func (s *WorkboardServer) getCodeReviews() (map[string]*proto.CodeReview, error) {
 	logger := s.logger
 
@@ -558,6 +568,8 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) (map[string]*pr
 	return codeReviews, nil
 }
 
+// storeCodeReview stores the code review in the database.
+// The caller is responsible for locking `dbMutex`.
 func (s *WorkboardServer) storeCodeReview(codeReview *proto.CodeReview) error {
 	codeReviews, err := s.getCodeReviews()
 	if err != nil {
@@ -576,6 +588,8 @@ func (s *WorkboardServer) storeCodeReview(codeReview *proto.CodeReview) error {
 func (s *WorkboardServer) GetCodeReviews(ctx context.Context, query *proto.GetCodeReviewsQuery) (*proto.GetCodeReviewsResponse, error) {
 	logger := s.logger
 	logger.Info("GetCodeReviews")
+
+	// Don't wait for database lock so the UI stays reactive
 
 	codeReviews, err := s.getCodeReviews()
 	if err != nil {
@@ -641,6 +655,9 @@ func (s *WorkboardServer) MarkMustReview(ctx context.Context, cmd *proto.MarkMus
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("MarkMustReview")
 
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
+
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get code review in order to mark it must-review")
@@ -670,6 +687,9 @@ func (s *WorkboardServer) MarkMustReview(ctx context.Context, cmd *proto.MarkMus
 func (s *WorkboardServer) MarkVisited(ctx context.Context, cmd *proto.MarkVisitedCommand) (*proto.CommandResponse, error) {
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("MarkVisited")
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
 
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
@@ -721,6 +741,9 @@ func (s *WorkboardServer) RefreshReview(ctx context.Context, cmd *proto.RefreshR
 		return nil, errors.Wrap(err, "failed to refresh code review")
 	}
 
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
+
 	// Code review may have changed by the state machine
 	err = s.storeCodeReview(codeReview)
 	if err != nil {
@@ -733,6 +756,9 @@ func (s *WorkboardServer) RefreshReview(ctx context.Context, cmd *proto.RefreshR
 func (s *WorkboardServer) ReviewedDeleteOnMerge(ctx context.Context, cmd *proto.ReviewedDeleteOnMergeCommand) (*proto.CommandResponse, error) {
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("ReviewedDeleteOnMerge")
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
 
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
@@ -764,6 +790,9 @@ func (s *WorkboardServer) ReviewedDeleteOnMerge(ctx context.Context, cmd *proto.
 func (s *WorkboardServer) SnoozeUntilMentioned(ctx context.Context, cmd *proto.SnoozeUntilMentionedCommand) (*proto.CommandResponse, error) {
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("SnoozeUntilMentioned")
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
 
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
@@ -800,6 +829,9 @@ func (s *WorkboardServer) SnoozeUntilTime(ctx context.Context, cmd *proto.Snooze
 	if cmd.SnoozeUntilTimestamp <= time.Now().Unix()+60 {
 		return nil, errors.New("SnoozeUntilTimeCommand.snooze_until_timestamp must be farther in the future")
 	}
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
 
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
@@ -854,6 +886,9 @@ func (s *WorkboardServer) SnoozeUntilUpdate(ctx context.Context, cmd *proto.Snoo
 	} else {
 		return nil, errors.Wrap(err, "only GitHub PRs supported in SnoozeUntilUpdate until now")
 	}
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
 
 	err = s.storeCodeReview(codeReview)
 	if err != nil {
