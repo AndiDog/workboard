@@ -272,7 +272,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           : 5;
     const numCodeReviewsToRefresh = Math.min(
       numCodeReviewsNeedingRefresh,
-      Math.max(3, Math.min(10, Math.floor(numCodeReviewsNeedingRefresh / 10))),
+      Math.max(10, Math.min(20, Math.floor(numCodeReviewsNeedingRefresh / 3))),
     );
 
     return { autoRefreshIntervalSeconds, numCodeReviewsToRefresh };
