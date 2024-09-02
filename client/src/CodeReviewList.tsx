@@ -272,13 +272,17 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     const lastUpdatedAgeSeconds =
       nowTimestamp - codeReview.lastUpdatedTimestamp;
 
+    const userDislikesReview =
+      codeReview.status ==
+      CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED;
+
     if (lastUpdatedAgeSeconds < -10) {
       // Large difference of clocks, treat like an old code review
       return 3600;
-    } else if (lastUpdatedAgeSeconds < 300) {
+    } else if (lastUpdatedAgeSeconds < 300 && !userDislikesReview) {
       // Very, very recently active
       return 60;
-    } else if (lastUpdatedAgeSeconds < 3600) {
+    } else if (lastUpdatedAgeSeconds < 3600 && !userDislikesReview) {
       // Very recently active
       return 300;
     } else if (lastUpdatedAgeSeconds < 86400) {
