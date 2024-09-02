@@ -696,7 +696,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               {codeReview.githubFields?.title || ''}
                             </a>
 
-                            <div className="actions">
+                            <div
+                              className={`actions ${this.state.codeReviewIdsWithActiveCommands.size > 1 || this.state.codeReviewIdsWithActiveCommands.has(codeReview.id) ? 'actions-disabled' : ''}`}
+                            >
                               {codeReview.status !=
                                 CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
                                 codeReview.status !=

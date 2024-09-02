@@ -10,7 +10,7 @@ table {
 }
 
 table.pull-requests {
-  width: 100%;
+  max-width: 120em;
   margin-bottom: 1.5em;
 }
 
@@ -219,6 +219,13 @@ td.status-updated-after-snooze {
   color: black;
 }
 
+.actions-disabled button,
+.actions-disabled select {
+  pointer-events: none;
+  border: 1px solid #eee;
+  color: #ddd;
+}
+
 .action-delete {
   font-weight: bold;
   color: #f20 !important;
@@ -227,6 +234,9 @@ td.status-updated-after-snooze {
 .action-reviewed-delete-on-merge {
   font-weight: bold;
   color: #09b134 !important;
+}
+.actions-disabled .action-reviewed-delete-on-merge {
+  color: #9ac3a5 !important;
 }
 
 /* CSS-only spinner from https://loading.io/css/ */
