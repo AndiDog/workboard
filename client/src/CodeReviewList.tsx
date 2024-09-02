@@ -216,6 +216,7 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
 }
 
 export default class CodeReviewList extends Component<{}, CodeReviewListState> {
+  lastAutoRelistTimestamp: number;
   lastAutoRefreshTimestamp: number;
   lastAutoRefreshErrorTimestamp: number;
   localLastRefreshedTimestampMap: Map<string, number>;
@@ -224,6 +225,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   constructor(props: {}) {
     super(props);
 
+    this.lastAutoRelistTimestamp = 0;
     this.lastAutoRefreshTimestamp = 0;
     this.lastAutoRefreshErrorTimestamp = 0;
     this.localLastRefreshedTimestampMap = new Map();
@@ -316,6 +318,15 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     }
 
     const nowTimestamp = Date.now() / 1000;
+
+    if (nowTimestamp - this.lastAutoRelistTimestamp >= 300) {
+      console.info('Re-listing code reviews');
+
+      // Search for new code reviews which aren't listed yet
+      this.lastAutoRelistTimestamp = nowTimestamp;
+      this.relist();
+      return;
+    }
 
     // We keep a local map of when the last auto-refresh was tried for each code review. That's because the
     // stored state may not keep up with `onIntervalBasedRefresh` being called every second, and we don't want
@@ -517,17 +528,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   onRelist(event: Event) {
     event.preventDefault();
 
-    let client = new WorkboardClient('https://localhost:16667');
-
-    client.RelistReviews(new RelistReviewsCommand(), null, (error, res) => {
-      const commandResult = toGrpcResult(error, res);
-      if (!commandResult.ok) {
-        console.error(`Command failed (RelistReviews): ${commandResult.error}`);
-        return;
-      }
-
-      this.refresh();
-    });
+    this.relist();
   }
 
   onReviewedDeleteOnMerge(event: Event, codeReviewId: string) {
@@ -665,6 +666,20 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           codeReviewsGrpcResult: toGrpcResult(error, res),
         });
       });
+    });
+  }
+
+  relist() {
+    let client = new WorkboardClient('https://localhost:16667');
+
+    client.RelistReviews(new RelistReviewsCommand(), null, (error, res) => {
+      const commandResult = toGrpcResult(error, res);
+      if (!commandResult.ok) {
+        console.error(`Command failed (RelistReviews): ${commandResult.error}`);
+        return;
+      }
+
+      this.refresh();
     });
   }
 
