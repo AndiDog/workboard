@@ -88,6 +88,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		LastChangedTimestamp:                       0,
 		LastRefreshedTimestamp:                     nowTimestamp,
 		LastUpdatedTimestamp:                       updatedAtTimestamp,
+		LastVisitedTimestamp:                       0,
 		SnoozeUntilUpdatedAtChangedFrom:            0,
 		BringBackToReviewIfNotMergedUntilTimestamp: 0,
 		SnoozeUntilTimestamp:                       0,
@@ -104,6 +105,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	}
 	codeReview.LastChangedTimestamp = max(existingCodeReview.LastChangedTimestamp, codeReview.LastChangedTimestamp)
 	codeReview.LastRefreshedTimestamp = max(existingCodeReview.LastRefreshedTimestamp, codeReview.LastRefreshedTimestamp)
+	codeReview.LastVisitedTimestamp = max(existingCodeReview.LastVisitedTimestamp, codeReview.LastVisitedTimestamp)
 
 	codeReview.SnoozeUntilUpdatedAtChangedFrom = existingCodeReview.SnoozeUntilUpdatedAtChangedFrom
 	codeReview.BringBackToReviewIfNotMergedUntilTimestamp = existingCodeReview.BringBackToReviewIfNotMergedUntilTimestamp
@@ -603,6 +605,32 @@ func (s *WorkboardServer) MarkMustReview(ctx context.Context, cmd *proto.MarkMus
 	err = s.storeCodeReview(codeReview)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to store must-review code review")
+	}
+
+	return &proto.CommandResponse{}, nil
+}
+
+func (s *WorkboardServer) MarkVisited(ctx context.Context, cmd *proto.MarkVisitedCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
+	logger.Info("MarkVisited")
+
+	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get code review in order to mark it visited")
+	}
+
+	if codeReview.GithubFields != nil {
+		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
+	}
+
+	codeReview.LastVisitedTimestamp = time.Now().Unix()
+
+	logger.Info(
+		"Marked code review as visited")
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to store visited code review")
 	}
 
 	return &proto.CommandResponse{}, nil

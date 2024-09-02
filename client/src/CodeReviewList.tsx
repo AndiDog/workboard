@@ -16,6 +16,7 @@ import {
   CodeReview,
   RefreshReviewCommand,
   DeleteReviewCommand,
+  MarkVisitedCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -599,6 +600,22 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  onVisitReview(codeReviewId: string) {
+    // NOT (we want the link click to behave as usual): event.preventDefault();
+
+    this.runCommandOnSingleCodeReview(
+      codeReviewId,
+      'visit',
+      (client, onResult) => {
+        client.MarkVisited(
+          new MarkVisitedCommand({ codeReviewId }),
+          null,
+          onResult,
+        );
+      },
+    );
+  }
+
   // TODO: Only re-fetch single code review, not all. Delete from state if the code review is gone from database.
   refetchCodeReview(codeReviewId: string) {
     let client = new WorkboardClient('https://localhost:16667');
@@ -738,7 +755,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                       codeReview.status !=
                         CodeReviewStatus.CODE_REVIEW_STATUS_DELETED && (
                         <tr
-                          className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-clicked' : ' recently-clicked') : ''}`}
+                          className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-changed' : ' recently-changed') : nowTimestamp - codeReview.lastVisitedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastVisitedTimestamp <= 900 ? ' very-recently-visited' : ' recently-visited') : ''}`}
                         >
                           <td>
                             <span className="repo-name">
@@ -808,6 +825,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               target="_blank"
                               rel="noopener"
                               style={`color: ${safeColor.random(codeReview.id)}`}
+                              onClick={(_) => this.onVisitReview(codeReview.id)}
                             >
                               {codeReview.githubFields?.title || ''}
                             </a>

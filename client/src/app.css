@@ -18,12 +18,20 @@ table.pull-requests tr {
   border-bottom: 1px solid #aaa;
 }
 
-table.pull-requests tr.recently-clicked {
+table.pull-requests tr.recently-changed {
   background-color: #c0f0fb;
 }
 
-table.pull-requests tr.very-recently-clicked {
+table.pull-requests tr.very-recently-changed {
   background-color: #1ecbf3;
+}
+
+table.pull-requests tr.recently-visited {
+  background-color: #ffe2fe;
+}
+
+table.pull-requests tr.very-recently-visited {
+  background-color: #ffbcfd;
 }
 
 .pull-requests thead {

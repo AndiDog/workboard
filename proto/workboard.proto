@@ -36,6 +36,11 @@ message CodeReview {
   // if not known.
   int64 last_updated_timestamp = 9;
 
+  // Last visit by click on link from workboard UI. Used to mark the last few
+  // in order to recognize them faster when coming back to the workboard
+  // browser tab.
+  int64 last_visited_timestamp = 12;
+
   // Code reviews must be kept longer in the database even in "deleted" status,
   // since a search e.g. on GitHub may find them again (especially, but not
   // only, once they're reopened).
@@ -112,6 +117,10 @@ message MarkMustReviewCommand {
   string code_review_id = 1;
 }
 
+message MarkVisitedCommand {
+  string code_review_id = 1;
+}
+
 message RefreshReviewCommand {
   string code_review_id = 1;
 }
@@ -140,6 +149,8 @@ service Workboard {
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
 
   rpc MarkMustReview(MarkMustReviewCommand) returns (CommandResponse) {}
+
+  rpc MarkVisited(MarkVisitedCommand) returns (CommandResponse) {}
 
   rpc RefreshReview(RefreshReviewCommand) returns (CommandResponse) {}
 
