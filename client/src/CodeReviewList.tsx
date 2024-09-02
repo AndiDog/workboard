@@ -216,6 +216,7 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
 export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   lastAutoRefreshTimestamp: number;
   lastAutoRefreshErrorTimestamp: number;
+  localLastRefreshedTimestampMap: Map<string, number>;
   refreshIntervalCancel?: NodeJS.Timeout;
 
   constructor(props: {}) {
@@ -223,6 +224,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     this.lastAutoRefreshTimestamp = 0;
     this.lastAutoRefreshErrorTimestamp = 0;
+    this.localLastRefreshedTimestampMap = new Map();
     this.state = {
       codeReviewGroups: undefined,
       codeReviewIdsWithActiveCommands: new Set(),
@@ -313,11 +315,27 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     const nowTimestamp = Date.now() / 1000;
 
+    // We keep a local map of when the last auto-refresh was tried for each code review. That's because the
+    // stored state may not keep up with `onIntervalBasedRefresh` being called every second, and we don't want
+    // to auto-refresh one code review multiple times just because its `lastRefreshedTimestamp` wasn't re-fetched
+    // in the last few seconds.
+    for (const [codeReviewId, localLastRefreshedTimestamp] of this
+      .localLastRefreshedTimestampMap) {
+      // We auto-refresh at most every 60 seconds (see `getAutoRefreshIntervalForSingleCodeReview`), so keep
+      // the cache roughly until that time.
+      if (nowTimestamp - localLastRefreshedTimestamp > 55) {
+        this.localLastRefreshedTimestampMap.delete(codeReviewId);
+      }
+    }
+
     const codeReviewsNeedingRefresh =
       this.state.codeReviewGroups
         ?.map((codeReviewGroup) =>
           codeReviewGroup.sortedCodeReviews.filter((codeReview) => {
             return (
+              nowTimestamp -
+                (this.localLastRefreshedTimestampMap.get(codeReview.id) ?? 0) >
+                55 &&
               codeReview.status !=
                 CodeReviewStatus.CODE_REVIEW_STATUS_DELETED &&
               nowTimestamp - codeReview.lastRefreshedTimestamp >=
@@ -376,6 +394,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       }
 
       hadCodeReviewIds.add(codeReviewToRefresh.id);
+      this.localLastRefreshedTimestampMap.set(
+        codeReviewToRefresh.id,
+        nowTimestamp,
+      );
       console.debug(
         `Refreshing code review (${i + 1}/${settings.numCodeReviewsToRefresh}) ` +
           `${codeReviewToRefresh.id} ` +
