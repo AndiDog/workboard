@@ -206,6 +206,8 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
 }
 
 export default class CodeReviewList extends Component<{}, CodeReviewListState> {
+  refreshIntervalCancel?: NodeJS.Timeout;
+
   constructor(props: {}) {
     super(props);
 
@@ -217,6 +219,100 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
   componentDidMount() {
     this.refresh(new GetCodeReviewsQuery());
+
+    this.refreshIntervalCancel = setInterval(
+      this.onIntervalBasedRefresh.bind(this),
+      5000,
+    );
+  }
+
+  componentWillUnmount() {
+    if (this.refreshIntervalCancel !== undefined) {
+      clearInterval(this.refreshIntervalCancel);
+      this.refreshIntervalCancel = undefined;
+    }
+  }
+
+  onIntervalBasedRefresh() {
+    if (document.hidden || !(this.state.codeReviewsGrpcResult?.ok || false)) {
+      return;
+    }
+
+    console.log('Interval-based refresh');
+
+    const nowTimestamp = Date.now() / 1000;
+
+    const codeReviewsNeedingRefresh =
+      this.state.codeReviewGroups
+        ?.map((codeReviewGroup) =>
+          codeReviewGroup.sortedCodeReviews.filter((codeReview) => {
+            return (
+              codeReview.status !=
+                CodeReviewStatus.CODE_REVIEW_STATUS_DELETED &&
+              nowTimestamp - codeReview.lastRefreshedTimestamp > 1800
+            );
+          }),
+        )
+        .flat(1) ?? [];
+
+    if (codeReviewsNeedingRefresh.length === 0) {
+      console.debug('No code reviews need a refresh');
+      return;
+    }
+    console.log(
+      `Found ${codeReviewsNeedingRefresh.length} code review(s) that need a refresh`,
+    );
+
+    const numCodeReviewsToRefresh = Math.min(
+      codeReviewsNeedingRefresh.length,
+      Math.max(
+        1,
+        Math.min(5, Math.floor(codeReviewsNeedingRefresh.length / 10)),
+      ),
+    );
+
+    const hadCodeReviewIds = new Set<string>();
+
+    for (let i = 0; i < numCodeReviewsToRefresh; ++i) {
+      let codeReviewToRefresh: CodeReview | undefined;
+      for (let j = 0; j < 10; ++j) {
+        // Give higher chances to top displayed code reviews
+        codeReviewToRefresh = codeReviewsNeedingRefresh.at(
+          codeReviewsNeedingRefresh.length * Math.pow(Math.random(), 1.2),
+        );
+        if (codeReviewToRefresh === undefined) {
+          break;
+        }
+
+        if (hadCodeReviewIds.has(codeReviewToRefresh.id)) {
+          continue;
+        }
+      }
+      if (codeReviewToRefresh === undefined) {
+        continue;
+      }
+
+      hadCodeReviewIds.add(codeReviewToRefresh.id);
+      console.debug(
+        `Refreshing code review (${i + 1}/${numCodeReviewsToRefresh}) ` +
+          `${codeReviewToRefresh.id} ` +
+          `(${codeReviewToRefresh.githubFields?.url || '<URL unknown>'})`,
+      );
+
+      this.runCommandOnSingleCodeReview(
+        codeReviewToRefresh.id,
+        'refresh',
+        (client, onResult) => {
+          client.RefreshReview(
+            new RefreshReviewCommand({
+              codeReviewId: codeReviewToRefresh.id,
+            }),
+            null,
+            onResult,
+          );
+        },
+      );
+    }
   }
 
   runCommandOnSingleCodeReview(
@@ -453,6 +549,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                   <button onClick={(event) => this.onRefreshAll(event)}>
                     Refresh all
                   </button>
+                  {this.state.codeReviewIdsWithActiveCommands.size > 0 && (
+                    <Spinner />
+                  )}
                 </div>
               </th>
               <th>Last updated</th>

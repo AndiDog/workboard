@@ -30,6 +30,8 @@ message CodeReview {
   // Last change to workboard status by the user. Can be zero if newly imported.
   int64 last_changed_timestamp = 5;
 
+  int64 last_refreshed_timestamp = 11;
+
   // Last update of the code review on the platform (e.g. GitHub). Can be zero
   // if not known.
   int64 last_updated_timestamp = 9;

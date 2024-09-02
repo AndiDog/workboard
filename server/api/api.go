@@ -57,6 +57,8 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED
 	}
 
+	nowTimestamp := time.Now().Unix()
+
 	var updatedAtTimestamp int64 = 0
 	if issue.UpdatedAt != nil {
 		updatedAtTimestamp = issue.UpdatedAt.Time.Unix()
@@ -84,6 +86,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		},
 
 		LastChangedTimestamp:                       0,
+		LastRefreshedTimestamp:                     nowTimestamp,
 		LastUpdatedTimestamp:                       updatedAtTimestamp,
 		SnoozeUntilUpdatedAtChangedFrom:            0,
 		BringBackToReviewIfNotMergedUntilTimestamp: 0,
@@ -99,9 +102,8 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_UNSPECIFIED {
 		codeReview.Status = existingCodeReview.Status
 	}
-	if existingCodeReview.LastChangedTimestamp > codeReview.LastChangedTimestamp {
-		codeReview.LastChangedTimestamp = existingCodeReview.LastChangedTimestamp
-	}
+	codeReview.LastChangedTimestamp = max(existingCodeReview.LastChangedTimestamp, codeReview.LastChangedTimestamp)
+	codeReview.LastRefreshedTimestamp = max(existingCodeReview.LastRefreshedTimestamp, codeReview.LastRefreshedTimestamp)
 
 	codeReview.SnoozeUntilUpdatedAtChangedFrom = existingCodeReview.SnoozeUntilUpdatedAtChangedFrom
 	codeReview.BringBackToReviewIfNotMergedUntilTimestamp = existingCodeReview.BringBackToReviewIfNotMergedUntilTimestamp
@@ -112,7 +114,6 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	//
 
 	updateLastChangedToNow := false
-	nowTimestamp := time.Now().Unix()
 
 	if (existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_DELETED &&
 		existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED) &&
@@ -296,7 +297,7 @@ func (s *WorkboardServer) getGitHubUser() (string, error) {
 		logger.Errorw("Failed to read GitHub user from database", "err", err)
 		return "", err
 	}
-	if !ok {
+	if !ok || gitHubUser == "" {
 		gitHubUser := os.Getenv("TEST_GITHUB_USER")
 		if gitHubUser != "" {
 			err = s.db.Set("github_user", gitHubUser)
