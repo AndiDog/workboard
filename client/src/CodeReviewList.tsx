@@ -132,6 +132,13 @@ type CodeReviewGroup = {
   sortedCodeReviews: CodeReview[];
 };
 
+function simplePlural(count: number, singular: string) {
+  if (count == 1) {
+    return singular;
+  }
+  return singular + 's';
+}
+
 function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
   const groupTypeStrToReviews: {
     [groupTypeStr: string]: CodeReview[];
@@ -618,6 +625,29 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   render() {
     const nowTimestamp = Date.now() / 1000;
 
+    let numCodeReviews = 0;
+    let numSnoozedCodeReviews = 0;
+    for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
+      for (const codeReview of codeReviewGroup.sortedCodeReviews) {
+        if (codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_DELETED) {
+          continue;
+        }
+
+        ++numCodeReviews;
+
+        if (
+          codeReview.status ==
+            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED ||
+          codeReview.status ==
+            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME ||
+          codeReview.status ==
+            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE
+        ) {
+          ++numSnoozedCodeReviews;
+        }
+      }
+    }
+
     return (
       <>
         <table className="pull-requests">
@@ -632,6 +662,11 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                   <button onClick={(event) => this.onRefreshAll(event)}>
                     Refresh all
                   </button>
+                  <span class="statistics">
+                    {numCodeReviews}{' '}
+                    {simplePlural(numCodeReviews, 'code review')},{' '}
+                    {numSnoozedCodeReviews} snoozed
+                  </span>
                   {this.state.codeReviewIdsWithActiveCommands.size > 0 && (
                     <Spinner />
                   )}

@@ -60,6 +60,12 @@ table.pull-requests tr.very-recently-clicked {
   margin-left: 1em;
 }
 
+.statistics {
+  color: #666;
+  font-weight: normal;
+  margin-left: 1em;
+}
+
 td,
 th {
   padding: 0.25rem 0.75rem;
