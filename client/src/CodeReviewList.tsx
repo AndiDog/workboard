@@ -989,6 +989,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                           codeReview.id,
                                         )
                                       }
+                                      disabled={
+                                        this.state
+                                          .codeReviewIdsWithActiveCommands
+                                          .size > 1 ||
+                                        this.state.codeReviewIdsWithActiveCommands.has(
+                                          codeReview.id,
+                                        )
+                                      }
                                     >
                                       <option value="">Snooze for…</option>
                                       <option value="3600">1 hour</option>
@@ -1003,6 +1011,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                           codeReview.id,
                                         )
                                       }
+                                      disabled={
+                                        this.state
+                                          .codeReviewIdsWithActiveCommands
+                                          .size > 1 ||
+                                        this.state.codeReviewIdsWithActiveCommands.has(
+                                          codeReview.id,
+                                        )
+                                      }
                                     >
                                       Snooze until update
                                     </button>
@@ -1014,6 +1030,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                 <button
                                   onClick={(event) =>
                                     this.onMarkMustReview(event, codeReview.id)
+                                  }
+                                  disabled={
+                                    this.state.codeReviewIdsWithActiveCommands
+                                      .size > 1 ||
+                                    this.state.codeReviewIdsWithActiveCommands.has(
+                                      codeReview.id,
+                                    )
                                   }
                                 >
                                   Mark 'must review'
@@ -1040,6 +1063,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                         codeReview.id,
                                       )
                                     }
+                                    disabled={
+                                      this.state.codeReviewIdsWithActiveCommands
+                                        .size > 1 ||
+                                      this.state.codeReviewIdsWithActiveCommands.has(
+                                        codeReview.id,
+                                      )
+                                    }
                                   >
                                     I reviewed or merged; delete once merged
                                   </button>
@@ -1050,6 +1080,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                   className="action-delete"
                                   onClick={(event) =>
                                     this.onDeleteReview(event, codeReview.id)
+                                  }
+                                  disabled={
+                                    this.state.codeReviewIdsWithActiveCommands
+                                      .size > 1 ||
+                                    this.state.codeReviewIdsWithActiveCommands.has(
+                                      codeReview.id,
+                                    )
                                   }
                                 >
                                   Delete
@@ -1064,6 +1101,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                       codeReview.id,
                                     )
                                   }
+                                  disabled={
+                                    this.state.codeReviewIdsWithActiveCommands
+                                      .size > 1 ||
+                                    this.state.codeReviewIdsWithActiveCommands.has(
+                                      codeReview.id,
+                                    )
+                                  }
                                 >
                                   Snooze until I'm mentioned
                                   <br />
@@ -1074,6 +1118,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               <button
                                 onClick={(event) =>
                                   this.onRefresh(event, codeReview.id)
+                                }
+                                disabled={
+                                  this.state.codeReviewIdsWithActiveCommands
+                                    .size > 1 ||
+                                  this.state.codeReviewIdsWithActiveCommands.has(
+                                    codeReview.id,
+                                  )
                                 }
                               >
                                 Refresh
