@@ -17,6 +17,7 @@ import {
   RefreshReviewCommand,
   DeleteReviewCommand,
   MarkVisitedCommand,
+  RelistReviewsCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -233,7 +234,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   componentDidMount() {
-    this.refresh(new GetCodeReviewsQuery());
+    this.refresh();
 
     this.refreshIntervalCancel = setInterval(
       this.onIntervalBasedRefresh.bind(this),
@@ -513,14 +514,20 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
-  onRefreshAll(event: Event) {
+  onRelist(event: Event) {
     event.preventDefault();
 
-    this.refresh(
-      new GetCodeReviewsQuery({
-        forceRefresh: true,
-      }),
-    );
+    let client = new WorkboardClient('https://localhost:16667');
+
+    client.RelistReviews(new RelistReviewsCommand(), null, (error, res) => {
+      const commandResult = toGrpcResult(error, res);
+      if (!commandResult.ok) {
+        console.error(`Command failed (RelistReviews): ${commandResult.error}`);
+        return;
+      }
+
+      this.refresh();
+    });
   }
 
   onReviewedDeleteOnMerge(event: Event, codeReviewId: string) {
@@ -641,12 +648,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     });
   }
 
-  refresh(query: GetCodeReviewsQuery) {
+  refresh() {
     const thiz = this;
     this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
       let client = new WorkboardClient('https://localhost:16667');
 
-      client.GetCodeReviews(query, null, (error, res) => {
+      client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
         let codeReviewGroups: CodeReviewGroup[] | undefined =
           thiz.state.codeReviewGroups;
         if (res !== null) {
@@ -698,8 +705,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               <th className="pull-requests-actions">
                 Actions
                 <div className="global-code-reviews-actions">
-                  <button onClick={(event) => this.onRefreshAll(event)}>
-                    Refresh all
+                  <button onClick={(event) => this.onRelist(event)}>
+                    Refresh list
                   </button>
                   <span class="statistics">
                     {numCodeReviews}{' '}

@@ -96,11 +96,7 @@ message GitHubRepo {
 
 // QUERIES
 
-message GetCodeReviewsQuery {
-  // Only meant for human-triggered "Refresh all" button clicks, as this can
-  // make lots of requests to APIs like GitHub's
-  bool force_refresh = 1;
-}
+message GetCodeReviewsQuery {}
 
 message GetCodeReviewsResponse {
   repeated CodeReview code_reviews = 1;
@@ -125,6 +121,8 @@ message MarkVisitedCommand {
 message RefreshReviewCommand {
   string code_review_id = 1;
 }
+
+message RelistReviewsCommand {}
 
 message ReviewedDeleteOnMergeCommand {
   string code_review_id = 1;
@@ -153,6 +151,12 @@ service Workboard {
 
   rpc MarkVisited(MarkVisitedCommand) returns (CommandResponse) {}
 
+  // Query providers (e.g. GitHub) for for new list of code reviews.
+  // This does not refresh single code reviews which were already known in the
+  // database, but loads details for any not-yet-known reviews.
+  rpc RelistReviews(RelistReviewsCommand) returns (CommandResponse) {}
+
+  // Refresh single code review
   rpc RefreshReview(RefreshReviewCommand) returns (CommandResponse) {}
 
   rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)

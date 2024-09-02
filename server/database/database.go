@@ -35,6 +35,15 @@ func (db *Database) Close() error {
 	return err
 }
 
+// Delete removes the given key from the database. A missing key is not an error.
+func (db *Database) Delete(key string) error {
+	err := db.roseDB.Delete([]byte(key))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Get fills the pointer `value` with the value from the database. If the key
 // does not exist in the database, `value` isn't changed and false is returned.
 // If the key was found, true is returned. The caller should therefore initialize

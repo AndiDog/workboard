@@ -47,7 +47,7 @@ type PR struct {
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
 func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, avatarUrl string, statusCheckRollupQueryState string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
-	id := *issue.HTMLURL // PR URL doesn't change and is unique, so use it as ID
+	id := getWorkboardCodeReviewIdFromGitHubIssue(issue)
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
 	switch *issue.State {
@@ -185,6 +185,10 @@ func getOwnerAndRepoFromGitHubIssue(issue *github.Issue, logger *zap.SugaredLogg
 	owner := m[1]
 	repo := m[2]
 	return owner, repo, nil
+}
+
+func getWorkboardCodeReviewIdFromGitHubIssue(issue *github.Issue) string {
+	return *issue.HTMLURL // PR URL doesn't change and is unique, so use it as ID
 }
 
 func paginateGitHubResults(perPage int, callback func(listOptions *github.ListOptions) (*github.Response, error)) error {
@@ -419,7 +423,7 @@ func (s *WorkboardServer) getCodeReviews() (map[string]*proto.CodeReview, error)
 	return codeReviews, nil
 }
 
-func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*proto.CodeReview, error) {
+func (s *WorkboardServer) relistCodeReviews(ctx context.Context) (map[string]*proto.CodeReview, error) {
 	logger := s.logger
 
 	// Used for the whole function incl. loop bodies (see hints below)
@@ -492,19 +496,27 @@ func (s *WorkboardServer) refreshCodeReviews(ctx context.Context) (map[string]*p
 			if _, ok := alreadyUpdatedGithubPrUrls[*issue.HTMLURL]; ok {
 				continue
 			}
+			alreadyUpdatedGithubPrUrls[*issue.HTMLURL] = true
+
+			// Only fetch code reviews which aren't known yet. For the existing reviews,
+			// the UI should perform single refreshes in batches since that keeps the UI
+			// responsive instead of taking minutes to display anything and hammering the
+			// GitHub API and others.
+			codeReviewId := getWorkboardCodeReviewIdFromGitHubIssue(issue)
+			if _, ok := codeReviews[codeReviewId]; ok {
+				continue
+			}
 
 			logger := logger.With("url", *issue.HTMLURL)
-			logger.Debug("Fetching GitHub PR details")
+			logger.Debug("Fetching details for not-yet-known GitHub PR")
 			var codeReview *proto.CodeReview
 			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, codeReviews, gitHubUser, logger)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to fetch GitHub PR details for refresh")
 			}
-			logger.Debug("Fetched GitHub PR details")
+			logger.Debug("Fetched details for not-yet-known GitHub PR")
 
 			codeReviews[codeReview.Id] = codeReview
-
-			alreadyUpdatedGithubPrUrls[*issue.HTMLURL] = true
 		}
 
 		if err != nil {
@@ -549,45 +561,10 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, query *proto.GetCo
 	logger := s.logger
 	logger.Info("GetCodeReviews")
 
-	var lastCodeReviewsRefresh int64 = 0
-	var err error
-
-	if !query.ForceRefresh {
-		_, err = s.db.Get("last_code_reviews_refresh", &lastCodeReviewsRefresh)
-		if err != nil {
-			logger.Errorw("Failed to read code reviews from database", "err", err)
-			return nil, err
-		}
-	}
-	nowTimestamp := time.Now().Unix()
-	var codeReviews map[string]*proto.CodeReview
-	if query.ForceRefresh || (lastCodeReviewsRefresh < nowTimestamp && nowTimestamp-lastCodeReviewsRefresh > 3600) {
-		if query.ForceRefresh {
-			logger.Debug("Forced code reviews refresh")
-		} else if lastCodeReviewsRefresh == 0 {
-			logger.Debug("No code reviews refresh known in database, triggering refresh")
-		} else {
-			logger.Debugw("Last code reviews refresh was long ago, triggering refresh", "secondsAgo", nowTimestamp-lastCodeReviewsRefresh)
-		}
-		codeReviews, err = s.refreshCodeReviews(ctx)
-		if err != nil {
-			logger.Errorw("Failed to refresh code reviews", "err", err)
-			return nil, err
-		}
-
-		err = s.db.Set("last_code_reviews_refresh", &nowTimestamp)
-		if err != nil {
-			logger.Errorw("Failed to store last code reviews refresh in database", "err", err)
-			return nil, err
-		}
-	} else {
-		logger.Debug("Last code reviews refresh is recent, returning cached code reviews without refresh")
-		codeReviews, err = s.getCodeReviews()
-
-		if err != nil {
-			logger.Errorw("Failed to get code reviews", "err", err)
-			return nil, err
-		}
+	codeReviews, err := s.getCodeReviews()
+	if err != nil {
+		logger.Errorw("Failed to get code reviews", "err", err)
+		return nil, err
 	}
 
 	res := &proto.GetCodeReviewsResponse{}
@@ -695,6 +672,25 @@ func (s *WorkboardServer) MarkVisited(ctx context.Context, cmd *proto.MarkVisite
 	err = s.storeCodeReview(codeReview)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to store visited code review")
+	}
+
+	return &proto.CommandResponse{}, nil
+}
+
+func (s *WorkboardServer) RelistReviews(ctx context.Context, query *proto.RelistReviewsCommand) (*proto.CommandResponse, error) {
+	logger := s.logger
+	logger.Info("RelistReviews")
+
+	// Not used anymore
+	err := s.db.Delete("last_code_reviews_refresh")
+	if err != nil {
+		logger.Warnw("Failed to delete deprecated database key", "err", err)
+	}
+
+	_, err = s.relistCodeReviews(ctx)
+	if err != nil {
+		logger.Errorw("Failed to refresh code reviews", "err", err)
+		return nil, err
 	}
 
 	return &proto.CommandResponse{}, nil
