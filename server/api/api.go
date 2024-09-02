@@ -46,7 +46,7 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, avatarUrl string, statusCheckRollupQueryState string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequest, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, avatarUrl string, extraInfo ExtraInfoGraphQLQuery, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	id := getWorkboardCodeReviewIdFromGitHubIssue(issue)
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
@@ -65,6 +65,16 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 	var updatedAtTimestamp int64 = 0
 	if issue.UpdatedAt != nil {
 		updatedAtTimestamp = issue.UpdatedAt.Time.Unix()
+	}
+
+	repoIsArchived := false
+	if extraInfo.Repository.ArchivedAt != nil && !extraInfo.Repository.ArchivedAt.IsZero() {
+		repoIsArchived = true
+	}
+
+	statusCheckRollupQueryState := ""
+	if len(extraInfo.Repository.PullRequest.Commits.Nodes) > 0 {
+		statusCheckRollupQueryState = extraInfo.Repository.PullRequest.Commits.Nodes[0].Commit.StatusCheckRollup.State
 	}
 
 	codeReview := &proto.CodeReview{
@@ -165,6 +175,12 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, pr *github.PullRequ
 		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE
 		updateLastChangedToNow = true
 		codeReview.SnoozeUntilUpdatedAtChangedFrom = 0
+	}
+
+	if repoIsArchived && existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_ARCHIVED {
+		logger.Infow("Repo became archived, marking PR as archived")
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_ARCHIVED
+		updateLastChangedToNow = true
 	}
 
 	if updateLastChangedToNow {
@@ -312,6 +328,24 @@ func (s *WorkboardServer) ensureGitHubClient() (*github.Client, *githubv4.Client
 	return s.gitHubClient, s.gitHubGraphQLClient, nil
 }
 
+type ExtraInfoGraphQLQuery struct {
+	Repository struct {
+		ArchivedAt *githubv4.DateTime
+
+		PullRequest struct {
+			Commits struct {
+				Nodes []struct {
+					Commit struct {
+						StatusCheckRollup struct {
+							State string
+						}
+					}
+				}
+			} `graphql:"commits(last: 1)"`
+		} `graphql:"pullRequest(number: $number)"`
+	} `graphql:"repository(owner: $owner, name: $name)"`
+}
+
 func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, existingCodeReviews map[string]*proto.CodeReview, gitHubUser string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
 	if err != nil {
@@ -329,24 +363,10 @@ func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, iss
 		return nil, errors.Wrap(err, "failed to fetch GitHub PR details")
 	}
 
-	var statusCheckRollupQuery struct {
-		Repository struct {
-			PullRequest struct {
-				Commits struct {
-					Nodes []struct {
-						Commit struct {
-							StatusCheckRollup struct {
-								State string
-							}
-						}
-					}
-				} `graphql:"commits(last: 1)"`
-			} `graphql:"pullRequest(number: $number)"`
-		} `graphql:"repository(owner: $owner, name: $name)"`
-	}
+	var extraInfo ExtraInfoGraphQLQuery
 	graphQLContext, cancelGraphQLContext := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelGraphQLContext()
-	err = graphQLClient.Query(graphQLContext, &statusCheckRollupQuery, map[string]interface{}{
+	err = graphQLClient.Query(graphQLContext, &extraInfo, map[string]interface{}{
 		"owner": githubv4.String(owner),
 		"name":  githubv4.String(repo),
 
@@ -358,14 +378,10 @@ func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, iss
 	if err != nil {
 		return nil, err
 	}
-	statusCheckRollupQueryState := ""
-	if len(statusCheckRollupQuery.Repository.PullRequest.Commits.Nodes) > 0 {
-		statusCheckRollupQueryState = statusCheckRollupQuery.Repository.PullRequest.Commits.Nodes[0].Commit.StatusCheckRollup.State
-	}
 
 	avatarUrl := s.conditionallyStoreUserAvatarUrl(pr.User)
 
-	codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, existingCodeReviews, gitHubUser, avatarUrl, statusCheckRollupQueryState, logger)
+	codeReview, err := convertGitHubToWorkboardCodeReview(issue, pr, owner, repo, existingCodeReviews, gitHubUser, avatarUrl, extraInfo, logger)
 	if err != nil {
 		return nil, err
 	}

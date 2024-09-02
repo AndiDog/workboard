@@ -179,6 +179,10 @@ td.github-status {
   width: 4em;
 }
 
+td.status-archived {
+  background-color: #d5b826dd;
+}
+
 td.status-closed {
   background-color: #d53d26dd;
 }

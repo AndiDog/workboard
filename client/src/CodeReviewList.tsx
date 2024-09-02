@@ -36,6 +36,7 @@ type CodeReviewListState = {
 const codeReviewStatusToStringMap: {
   [codeReviewStatus in CodeReviewStatus]: string;
 } = {
+  [CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED]: 'archived',
   [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 'closed',
   [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 'deleted',
   [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 'merged',
@@ -87,6 +88,7 @@ const statusSortOrder: {
   [codeReviewStatus in CodeReviewStatus]: number;
 } = {
   // Low number = sorted to top, high number = sorted to bottom
+  [CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED]: 1,
   [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 1,
   [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 999, // not applicable since we filter those out for rendering
   [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 1,
@@ -153,7 +155,8 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
       codeReview.status ==
         CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE ||
-      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED
     ) {
       groupType = CodeReviewGroupType.MergedOrUpdated;
     } else if (
@@ -924,6 +927,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                 codeReview.status !=
                                   CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED &&
                                 codeReview.status !=
+                                  CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED &&
+                                codeReview.status !=
                                   CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE && (
                                   <button
                                     className="action-reviewed-delete-on-merge"
@@ -941,7 +946,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               {(codeReview.status ==
                                 CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
                                 codeReview.status ==
-                                  CodeReviewStatus.CODE_REVIEW_STATUS_MERGED) && (
+                                  CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
+                                codeReview.status ==
+                                  CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED) && (
                                 <button
                                   className="action-delete"
                                   onClick={(event) =>
