@@ -206,11 +206,15 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
 }
 
 export default class CodeReviewList extends Component<{}, CodeReviewListState> {
+  lastAutoRefreshTimestamp: number;
+  lastAutoRefreshErrorTimestamp: number;
   refreshIntervalCancel?: NodeJS.Timeout;
 
   constructor(props: {}) {
     super(props);
 
+    this.lastAutoRefreshTimestamp = 0;
+    this.lastAutoRefreshErrorTimestamp = 0;
     this.state = {
       codeReviewGroups: undefined,
       codeReviewIdsWithActiveCommands: new Set(),
@@ -222,7 +226,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     this.refreshIntervalCancel = setInterval(
       this.onIntervalBasedRefresh.bind(this),
-      5000,
+      1000,
     );
   }
 
@@ -233,8 +237,38 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     }
   }
 
+  // Calculate how often and how many code reviews at once should be auto-refreshed. For a larger
+  // number of code reviews with outdated information, the refresh should happen quickly. That happens
+  // for example when opening workboard the first time in the morning of a working day.
+  getAutoRefreshIntervalAndBatchSizeForAllCodeReviews(
+    numCodeReviewsNeedingRefresh: number,
+    nowTimestamp: number,
+  ): {
+    autoRefreshIntervalSeconds: number;
+    numCodeReviewsToRefresh: number;
+  } {
+    const autoRefreshIntervalSeconds =
+      // No clock drift?
+      nowTimestamp - this.lastAutoRefreshErrorTimestamp >= -10 &&
+      // Back off in case of errors (e.g. GitHub API rate limit)
+      nowTimestamp - this.lastAutoRefreshErrorTimestamp < 60
+        ? 15
+        : numCodeReviewsNeedingRefresh > 50
+          ? 2
+          : 5;
+    const numCodeReviewsToRefresh = Math.min(
+      numCodeReviewsNeedingRefresh,
+      Math.max(1, Math.min(5, Math.floor(numCodeReviewsNeedingRefresh / 10))),
+    );
+
+    return { autoRefreshIntervalSeconds, numCodeReviewsToRefresh };
+  }
+
   // Calculate how often a code review should be refresh. Active PRs (= recently updated) should be updated more often.
-  getRefreshInterval(codeReview: CodeReview, nowTimestamp: number): number {
+  getAutoRefreshIntervalForSingleCodeReview(
+    codeReview: CodeReview,
+    nowTimestamp: number,
+  ): number {
     const lastUpdatedAgeSeconds =
       nowTimestamp - codeReview.lastUpdatedTimestamp;
 
@@ -261,8 +295,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       return;
     }
 
-    console.log('Interval-based refresh');
-
     const nowTimestamp = Date.now() / 1000;
 
     const codeReviewsNeedingRefresh =
@@ -273,7 +305,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               codeReview.status !=
                 CodeReviewStatus.CODE_REVIEW_STATUS_DELETED &&
               nowTimestamp - codeReview.lastRefreshedTimestamp >=
-                this.getRefreshInterval(codeReview, nowTimestamp)
+                this.getAutoRefreshIntervalForSingleCodeReview(
+                  codeReview,
+                  nowTimestamp,
+                )
             );
           }),
         )
@@ -283,21 +318,29 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       console.debug('No code reviews need a refresh');
       return;
     }
-    console.log(
-      `Found ${codeReviewsNeedingRefresh.length} code review(s) that need a refresh`,
+
+    const settings = this.getAutoRefreshIntervalAndBatchSizeForAllCodeReviews(
+      codeReviewsNeedingRefresh.length,
+      nowTimestamp,
     );
 
-    const numCodeReviewsToRefresh = Math.min(
-      codeReviewsNeedingRefresh.length,
-      Math.max(
-        1,
-        Math.min(5, Math.floor(codeReviewsNeedingRefresh.length / 10)),
-      ),
+    if (
+      // No clock drift
+      nowTimestamp > this.lastAutoRefreshTimestamp &&
+      // Not time yet to auto-refresh
+      nowTimestamp - this.lastAutoRefreshTimestamp <
+        settings.autoRefreshIntervalSeconds
+    ) {
+      return;
+    }
+    this.lastAutoRefreshTimestamp = nowTimestamp;
+    console.info(
+      `Auto-refresh with autoRefreshIntervalSeconds=${settings.autoRefreshIntervalSeconds} numCodeReviewsToRefresh=${settings.numCodeReviewsToRefresh} codeReviewsNeedingRefresh.length=${codeReviewsNeedingRefresh.length}`,
     );
 
     const hadCodeReviewIds = new Set<string>();
 
-    for (let i = 0; i < numCodeReviewsToRefresh; ++i) {
+    for (let i = 0; i < settings.numCodeReviewsToRefresh; ++i) {
       let codeReviewToRefresh: CodeReview | undefined;
       for (let j = 0; j < 10; ++j) {
         // Give higher chances to top displayed code reviews
@@ -318,7 +361,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
       hadCodeReviewIds.add(codeReviewToRefresh.id);
       console.debug(
-        `Refreshing code review (${i + 1}/${numCodeReviewsToRefresh}) ` +
+        `Refreshing code review (${i + 1}/${settings.numCodeReviewsToRefresh}) ` +
           `${codeReviewToRefresh.id} ` +
           `(${codeReviewToRefresh.githubFields?.url || '<URL unknown>'})`,
       );
@@ -332,7 +375,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               codeReviewId: codeReviewToRefresh.id,
             }),
             null,
-            onResult,
+            (error, res) => {
+              const commandResult = toGrpcResult(error, res);
+              if (!commandResult.ok) {
+                this.lastAutoRefreshErrorTimestamp = Date.now() / 1000;
+              }
+
+              onResult(error, res);
+            },
           );
         },
       );
