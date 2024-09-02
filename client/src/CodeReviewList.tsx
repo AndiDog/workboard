@@ -233,6 +233,29 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     }
   }
 
+  // Calculate how often a code review should be refresh. Active PRs (= recently updated) should be updated more often.
+  getRefreshInterval(codeReview: CodeReview, nowTimestamp: number): number {
+    const lastUpdatedAgeSeconds =
+      nowTimestamp - codeReview.lastUpdatedTimestamp;
+
+    if (lastUpdatedAgeSeconds < -10) {
+      // Large difference of clocks, treat like an old code review
+      return 3600;
+    } else if (lastUpdatedAgeSeconds < 300) {
+      // Very, very recently active
+      return 60;
+    } else if (lastUpdatedAgeSeconds < 3600) {
+      // Very recently active
+      return 300;
+    } else if (lastUpdatedAgeSeconds < 86400) {
+      // Somewhat recently active
+      return 900;
+    } else {
+      // Less active
+      return 1800;
+    }
+  }
+
   onIntervalBasedRefresh() {
     if (document.hidden || !(this.state.codeReviewsGrpcResult?.ok || false)) {
       return;
@@ -249,7 +272,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
             return (
               codeReview.status !=
                 CodeReviewStatus.CODE_REVIEW_STATUS_DELETED &&
-              nowTimestamp - codeReview.lastRefreshedTimestamp > 1800
+              nowTimestamp - codeReview.lastRefreshedTimestamp >=
+                this.getRefreshInterval(codeReview, nowTimestamp)
             );
           }),
         )
