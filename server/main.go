@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -43,6 +45,13 @@ func main() {
 
 	// Database
 	databaseDir := os.Getenv("DATABASE_DIR")
+	if strings.HasPrefix(databaseDir, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			logger.Fatalw("Failed to expand DATABASE_DIR environment variable", "err", err)
+		}
+		databaseDir = filepath.Join(homeDir, databaseDir[2:])
+	}
 	if databaseDir == "" {
 		logger.Fatal("Missing DATABASE_DIR environment variable")
 	}
