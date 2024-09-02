@@ -391,16 +391,18 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       let codeReviewToRefresh: CodeReview | undefined;
       for (let j = 0; j < 10; ++j) {
         // Give higher chances to top displayed code reviews
-        codeReviewToRefresh = codeReviewsNeedingRefresh.at(
+        const randomCodeReview = codeReviewsNeedingRefresh.at(
           codeReviewsNeedingRefresh.length * Math.pow(Math.random(), 1.2),
         );
-        if (codeReviewToRefresh === undefined) {
+        if (randomCodeReview === undefined) {
           break;
         }
 
-        if (hadCodeReviewIds.has(codeReviewToRefresh.id)) {
+        if (hadCodeReviewIds.has(randomCodeReview.id)) {
           continue;
         }
+
+        codeReviewToRefresh = randomCodeReview;
       }
       if (codeReviewToRefresh === undefined) {
         continue;
