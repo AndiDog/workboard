@@ -26,6 +26,26 @@ table.pull-requests tr.very-recently-clicked {
   background-color: #1ecbf3;
 }
 
+/*
+  Fixed width percentages so the table doesn't jump around so much on automatic
+  code review refreshes
+*/
+.pull-requests-repo {
+  width: 20%;
+}
+.pull-requests-status {
+  width: 7%;
+}
+.pull-requests-github-status {
+  width: 5%;
+}
+.pull-requests-actions {
+  width: 63%;
+}
+.pull-requests-last-updated {
+  width: 5%;
+}
+
 .global-code-reviews-actions {
   display: inline-block;
   margin-left: 1em;

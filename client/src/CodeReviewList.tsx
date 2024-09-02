@@ -564,10 +564,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         <table className="pull-requests">
           <thead>
             <tr>
-              <th>Repo</th>
-              <th>Your status</th>
-              <th>GitHub state</th>
-              <th>
+              <th className="pull-requests-repo">Repo</th>
+              <th className="pull-requests-status">Your status</th>
+              <th className="pull-requests-github-status">GitHub state</th>
+              <th className="pull-requests-actions">
                 Actions
                 <div className="global-code-reviews-actions">
                   <button onClick={(event) => this.onRefreshAll(event)}>
@@ -578,7 +578,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                   )}
                 </div>
               </th>
-              <th>Last updated</th>
+              <th className="pull-requests-last-updated">Last updated</th>
             </tr>
           </thead>
           <tbody>
