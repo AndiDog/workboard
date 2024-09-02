@@ -284,9 +284,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     } else if (lastUpdatedAgeSeconds < 86400) {
       // Somewhat recently active
       return 900;
+    } else if (lastUpdatedAgeSeconds < 14 * 86400) {
+      return 7200;
+    } else if (lastUpdatedAgeSeconds < 60 * 86400) {
+      return 14400;
     } else {
-      // Less active
-      return 1800;
+      // Dying in a dusty corner
+      return 86400;
     }
   }
 
