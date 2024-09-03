@@ -223,6 +223,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   lastAutoRefreshTimestamp: number;
   lastAutoRefreshErrorTimestamp: number;
   localLastRefreshedTimestampMap: Map<string, number>;
+  numRunningAutoRefreshRequests: number;
   refreshIntervalCancel?: NodeJS.Timeout;
 
   constructor(props: {}) {
@@ -232,6 +233,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.lastAutoRefreshTimestamp = 0;
     this.lastAutoRefreshErrorTimestamp = 0;
     this.localLastRefreshedTimestampMap = new Map();
+    this.numRunningAutoRefreshRequests = 0;
     this.state = {
       codeReviewGroups: undefined,
       codeReviewIdsWithActiveCommands: new Set(),
@@ -434,6 +436,15 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           `(${codeReviewToRefresh.githubFields?.url || '<URL unknown>'})`,
       );
 
+      ++this.numRunningAutoRefreshRequests;
+      if (this.numRunningAutoRefreshRequests > 20) {
+        console.debug(
+          'Too many concurrent RPC requests, skipping auto-refresh',
+        );
+        --this.numRunningAutoRefreshRequests;
+        return;
+      }
+
       this.runCommandOnSingleCodeReview(
         codeReviewToRefresh.id,
         'refresh',
@@ -444,6 +455,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
             }),
             null,
             (error, res) => {
+              --this.numRunningAutoRefreshRequests;
               const commandResult = toGrpcResult(error, res);
               if (!commandResult.ok) {
                 this.lastAutoRefreshErrorTimestamp = Date.now() / 1000;
