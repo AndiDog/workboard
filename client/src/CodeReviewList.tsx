@@ -320,10 +320,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED ||
-      (codeReview.status ==
-        CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE &&
-        codeReview.githubFields?.status ==
-          GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED)
+      codeReview.githubFields?.status ==
+        GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED ||
+      codeReview.githubFields?.status ==
+        GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED
     );
   }
 
