@@ -919,6 +919,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               this.state.codeReviewGroups!.map((codeReviewGroup) => (
                 <>
                   <tr
+                    key={codeReviewGroup.groupTypeStrWithoutOrderPrefix}
                     className={`code-review-group code-review-group-type-${codeReviewGroup.groupTypeStrWithoutOrderPrefix}`}
                   >
                     <td colSpan={5}>
@@ -944,6 +945,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                       codeReview.status !=
                         CodeReviewStatus.CODE_REVIEW_STATUS_DELETED && (
                         <tr
+                          key={codeReview.id}
                           className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-changed' : ' recently-changed') : nowTimestamp - codeReview.lastVisitedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastVisitedTimestamp <= 900 ? ' very-recently-visited' : ' recently-visited') : ''}`}
                         >
                           <td>
