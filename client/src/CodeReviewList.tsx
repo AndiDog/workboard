@@ -953,6 +953,15 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               <img
                                 className="code-review-pipeline-status"
                                 src="/check-double.svg"
+                                title="Pipeline succeeded"
+                              />
+                            )}
+                            {codeReview.githubFields?.statusCheckRollupStatus ==
+                              'PENDING' && (
+                              <img
+                                className="code-review-pipeline-status"
+                                src="/hourglass.svg"
+                                title="Pipeline pending or on hold"
                               />
                             )}
                             {codeReview.githubFields?.statusCheckRollupStatus ==
@@ -960,6 +969,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               <img
                                 className="code-review-pipeline-status"
                                 src="/xmark.svg"
+                                title="Pipeline failed"
                               />
                             )}
 
