@@ -285,6 +285,9 @@ func (s *WorkboardServer) DeleteReview(ctx context.Context, cmd *proto.DeleteRev
 		logger.Errorw("Failed to get code review in order to delete it", "err", err)
 		return nil, errors.Wrap(err, "failed to get code review in order to delete it")
 	}
+	if codeReview == nil {
+		return nil, errors.New("no such code review")
+	}
 
 	logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
 
@@ -665,6 +668,9 @@ func (s *WorkboardServer) MarkMustReview(ctx context.Context, cmd *proto.MarkMus
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get code review in order to mark it must-review")
 	}
+	if codeReview == nil {
+		return nil, errors.New("no such code review")
+	}
 
 	if codeReview.GithubFields != nil {
 		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
@@ -697,6 +703,9 @@ func (s *WorkboardServer) MarkVisited(ctx context.Context, cmd *proto.MarkVisite
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get code review in order to mark it visited")
+	}
+	if codeReview == nil {
+		return nil, errors.New("no such code review")
 	}
 
 	if codeReview.GithubFields != nil {
@@ -780,6 +789,9 @@ func (s *WorkboardServer) ReviewedDeleteOnMerge(ctx context.Context, cmd *proto.
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get code review in order to mark it reviewed-delete-on-merge")
 	}
+	if codeReview == nil {
+		return nil, errors.New("no such code review")
+	}
 
 	if codeReview.GithubFields != nil {
 		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
@@ -813,6 +825,9 @@ func (s *WorkboardServer) SnoozeUntilMentioned(ctx context.Context, cmd *proto.S
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get code review in order to snooze it until mentioned")
+	}
+	if codeReview == nil {
+		return nil, errors.New("no such code review")
 	}
 
 	if codeReview.GithubFields != nil {
@@ -852,6 +867,9 @@ func (s *WorkboardServer) SnoozeUntilTime(ctx context.Context, cmd *proto.Snooze
 	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get code review in order to snooze it until time")
+	}
+	if codeReview == nil {
+		return nil, errors.New("no such code review")
 	}
 
 	if codeReview.GithubFields != nil {
