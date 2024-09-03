@@ -18,6 +18,7 @@ import {
   DeleteReviewCommand,
   MarkVisitedCommand,
   RelistReviewsCommand,
+  RefreshReviewsCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -399,13 +400,15 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     }
     this.lastAutoRefreshTimestamp = nowTimestamp;
     console.info(
-      `Auto-refresh with autoRefreshIntervalSeconds=${settings.autoRefreshIntervalSeconds} numCodeReviewsToRefresh=${settings.numCodeReviewsToRefresh} codeReviewsNeedingRefresh.length=${codeReviewsNeedingRefresh.length}`,
+      `Auto-refresh with autoRefreshIntervalSeconds=${settings.autoRefreshIntervalSeconds} ` +
+        `numCodeReviewsToRefresh=${settings.numCodeReviewsToRefresh} ` +
+        `codeReviewsNeedingRefresh.length=${codeReviewsNeedingRefresh.length} ` +
+        `this.numRunningAutoRefreshRequests=${this.numRunningAutoRefreshRequests}`,
     );
 
-    const hadCodeReviewIds = new Set<string>();
+    const codeReviewIdsToRefresh = new Set<string>();
 
     for (let i = 0; i < settings.numCodeReviewsToRefresh; ++i) {
-      let codeReviewToRefresh: CodeReview | undefined;
       for (let j = 0; j < 10; ++j) {
         // Give higher chances to top displayed code reviews
         const randomCodeReview = codeReviewsNeedingRefresh.at(
@@ -415,61 +418,56 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           break;
         }
 
-        if (hadCodeReviewIds.has(randomCodeReview.id)) {
+        if (codeReviewIdsToRefresh.has(randomCodeReview.id)) {
           continue;
         }
-
-        codeReviewToRefresh = randomCodeReview;
+        codeReviewIdsToRefresh.add(randomCodeReview.id);
+        break;
       }
-      if (codeReviewToRefresh === undefined) {
-        continue;
-      }
+    }
 
-      hadCodeReviewIds.add(codeReviewToRefresh.id);
+    ++this.numRunningAutoRefreshRequests;
+    if (this.numRunningAutoRefreshRequests > 2) {
+      console.debug('Too many concurrent RPC requests, skipping auto-refresh');
+      --this.numRunningAutoRefreshRequests;
+      return;
+    }
+
+    for (const codeReviewIdToRefresh of codeReviewIdsToRefresh) {
       this.localLastRefreshedTimestampMap.set(
-        codeReviewToRefresh.id,
+        codeReviewIdToRefresh,
         nowTimestamp,
       );
-      console.debug(
-        `Refreshing code review (${i + 1}/${settings.numCodeReviewsToRefresh}) ` +
-          `${codeReviewToRefresh.id} ` +
-          `(${codeReviewToRefresh.githubFields?.url || '<URL unknown>'})`,
-      );
-
-      ++this.numRunningAutoRefreshRequests;
-      if (this.numRunningAutoRefreshRequests > 20) {
-        console.debug(
-          'Too many concurrent RPC requests, skipping auto-refresh',
-        );
-        --this.numRunningAutoRefreshRequests;
-        return;
-      }
-
-      this.runCommandOnSingleCodeReview(
-        codeReviewToRefresh.id,
-        'refresh',
-        (client, onResult) => {
-          client.RefreshReview(
-            new RefreshReviewCommand({
-              codeReviewId: codeReviewToRefresh.id,
-            }),
-            null,
-            (error, res) => {
-              --this.numRunningAutoRefreshRequests;
-              const commandResult = toGrpcResult(error, res);
-              if (!commandResult.ok) {
-                this.lastAutoRefreshErrorTimestamp = Date.now() / 1000;
-              }
-
-              onResult(error, res);
-            },
-          );
-        },
-      );
     }
+    console.debug(
+      `Refreshing ${codeReviewIdsToRefresh.size} code reviews: ${JSON.stringify([...codeReviewIdsToRefresh])}`,
+    );
+
+    this.runCommandOnManyCodeReviews(
+      [...codeReviewIdsToRefresh],
+      'refresh',
+      (codeReviewIds, client, onResult) => {
+        client.RefreshReviews(
+          new RefreshReviewsCommand({
+            codeReviewIds,
+          }),
+          null,
+          (error, res) => {
+            --this.numRunningAutoRefreshRequests;
+
+            const commandResult = toGrpcResult(error, res);
+            if (!commandResult.ok) {
+              this.lastAutoRefreshErrorTimestamp = Date.now() / 1000;
+            }
+
+            onResult(error, res);
+          },
+        );
+      },
+    );
   }
 
-  runCommandOnManyCodeReviews(
+  runCommandOnEachCodeReview(
     codeReviewIds: Array<string>,
     commandDesc: string,
     runCommand: (
@@ -506,10 +504,51 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
             ++numDone;
             if (numDone == codeReviewIds.length) {
               console.debug('Batch action done, getting code reviews list');
-              thiz.refresh();
+              thiz.refresh({
+                removeCodeReviewIdsWithActiveCommands: codeReviewIds,
+              });
             }
           });
         }
+      },
+    );
+  }
+
+  runCommandOnManyCodeReviews(
+    codeReviewIds: Array<string>,
+    commandDesc: string,
+    runCommand: (
+      codeReviewIds: Array<string>,
+      client: WorkboardClient,
+      onResult: (error: RpcError, res: CommandResponse) => void,
+    ) => void,
+  ) {
+    const thiz = this;
+    this.setState(
+      {
+        codeReviewIdsWithActiveCommands: new Set([
+          ...this.state.codeReviewIdsWithActiveCommands,
+          ...codeReviewIds,
+        ]),
+      },
+      () => {
+        let client = new WorkboardClient('https://localhost:16667');
+
+        runCommand(codeReviewIds, client, (error, res) => {
+          const commandResult = toGrpcResult(error, res);
+          if (!commandResult.ok) {
+            console.error(
+              `Command failed (${commandDesc}): ${commandResult.error}`,
+            );
+
+            // Continue to refresh since that will remove the code reviews from `codeReviewIdsWithActiveCommands`
+            // and after an error, it's probably a good idea to get the latest data.
+          }
+
+          thiz.refresh({
+            removeCodeReviewIdsWithActiveCommands: codeReviewIds,
+          });
+        });
       },
     );
   }
@@ -585,7 +624,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       }
     }
 
-    this.runCommandOnManyCodeReviews(
+    this.runCommandOnEachCodeReview(
       codeReviewIdsToDelete,
       'delete review (batch)',
       (codeReviewId, client, onResult) => {
@@ -727,7 +766,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
-  // TODO: Only re-fetch single code review, not all. Delete from state if the code review is gone from database.
   refetchCodeReview(codeReviewId: string) {
     let client = new WorkboardClient('https://localhost:16667');
 
@@ -752,7 +790,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     });
   }
 
-  refresh() {
+  refresh(opts?: { removeCodeReviewIdsWithActiveCommands?: Array<string> }) {
     const thiz = this;
     this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
       let client = new WorkboardClient('https://localhost:16667');
@@ -764,8 +802,18 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           codeReviewGroups = sortCodeReviews(res);
         }
 
+        const newCodeReviewIdsWithActiveCommands = new Set(
+          this.state.codeReviewIdsWithActiveCommands,
+        );
+        if (opts?.removeCodeReviewIdsWithActiveCommands?.length ?? 0 > 0) {
+          for (const codeReviewId of opts?.removeCodeReviewIdsWithActiveCommands!) {
+            newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
+          }
+        }
+
         this.setState({
           codeReviewGroups,
+          codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
           codeReviewsGrpcResult: toGrpcResult(error, res),
         });
       });
@@ -997,7 +1045,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                             </a>
 
                             <div
-                              className={`actions ${this.state.codeReviewIdsWithActiveCommands.size > 1 || this.state.codeReviewIdsWithActiveCommands.has(codeReview.id) ? 'actions-disabled' : ''}`}
+                              className={`actions ${this.state.codeReviewIdsWithActiveCommands.has(codeReview.id) ? 'actions-disabled' : ''}`}
                             >
                               {codeReview.status !=
                                 CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
@@ -1011,14 +1059,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                           codeReview.id,
                                         )
                                       }
-                                      disabled={
-                                        this.state
-                                          .codeReviewIdsWithActiveCommands
-                                          .size > 1 ||
-                                        this.state.codeReviewIdsWithActiveCommands.has(
-                                          codeReview.id,
-                                        )
-                                      }
+                                      disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                        codeReview.id,
+                                      )}
                                     >
                                       <option value="">Snooze for…</option>
                                       <option value="3600">1 hour</option>
@@ -1033,14 +1076,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                           codeReview.id,
                                         )
                                       }
-                                      disabled={
-                                        this.state
-                                          .codeReviewIdsWithActiveCommands
-                                          .size > 1 ||
-                                        this.state.codeReviewIdsWithActiveCommands.has(
-                                          codeReview.id,
-                                        )
-                                      }
+                                      disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                        codeReview.id,
+                                      )}
                                     >
                                       Snooze until update
                                     </button>
@@ -1053,13 +1091,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                   onClick={(event) =>
                                     this.onMarkMustReview(event, codeReview.id)
                                   }
-                                  disabled={
-                                    this.state.codeReviewIdsWithActiveCommands
-                                      .size > 1 ||
-                                    this.state.codeReviewIdsWithActiveCommands.has(
-                                      codeReview.id,
-                                    )
-                                  }
+                                  disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                    codeReview.id,
+                                  )}
                                 >
                                   Mark 'must review'
                                 </button>
@@ -1085,13 +1119,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                         codeReview.id,
                                       )
                                     }
-                                    disabled={
-                                      this.state.codeReviewIdsWithActiveCommands
-                                        .size > 1 ||
-                                      this.state.codeReviewIdsWithActiveCommands.has(
-                                        codeReview.id,
-                                      )
-                                    }
+                                    disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                      codeReview.id,
+                                    )}
                                   >
                                     I reviewed or merged; delete once merged
                                   </button>
@@ -1103,13 +1133,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                   onClick={(event) =>
                                     this.onDeleteReview(event, codeReview.id)
                                   }
-                                  disabled={
-                                    this.state.codeReviewIdsWithActiveCommands
-                                      .size > 1 ||
-                                    this.state.codeReviewIdsWithActiveCommands.has(
-                                      codeReview.id,
-                                    )
-                                  }
+                                  disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                    codeReview.id,
+                                  )}
                                 >
                                   Delete
                                 </button>
@@ -1123,13 +1149,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                       codeReview.id,
                                     )
                                   }
-                                  disabled={
-                                    this.state.codeReviewIdsWithActiveCommands
-                                      .size > 1 ||
-                                    this.state.codeReviewIdsWithActiveCommands.has(
-                                      codeReview.id,
-                                    )
-                                  }
+                                  disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                    codeReview.id,
+                                  )}
                                 >
                                   Snooze until I'm mentioned
                                   <br />
@@ -1141,13 +1163,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                 onClick={(event) =>
                                   this.onRefresh(event, codeReview.id)
                                 }
-                                disabled={
-                                  this.state.codeReviewIdsWithActiveCommands
-                                    .size > 1 ||
-                                  this.state.codeReviewIdsWithActiveCommands.has(
-                                    codeReview.id,
-                                  )
-                                }
+                                disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                  codeReview.id,
+                                )}
                               >
                                 Refresh
                               </button>

@@ -123,6 +123,10 @@ message RefreshReviewCommand {
   string code_review_id = 1;
 }
 
+message RefreshReviewsCommand {
+  repeated string code_review_ids = 1;
+}
+
 message RelistReviewsCommand {}
 
 message ReviewedDeleteOnMergeCommand {
@@ -159,6 +163,9 @@ service Workboard {
 
   // Refresh single code review
   rpc RefreshReview(RefreshReviewCommand) returns (CommandResponse) {}
+
+  // Refresh many code reviews at once
+  rpc RefreshReviews(RefreshReviewsCommand) returns (CommandResponse) {}
 
   rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
       returns (CommandResponse) {}

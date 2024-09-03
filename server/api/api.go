@@ -633,6 +633,9 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 		return nil, errors.Wrap(err, "failed to get GitHub PR")
 	}
 
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
+
 	codeReviews, err := s.getCodeReviews()
 	if err != nil {
 		return nil, err
@@ -736,18 +739,31 @@ func (s *WorkboardServer) RefreshReview(ctx context.Context, cmd *proto.RefreshR
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("RefreshReview")
 
-	codeReview, err := s.refreshCodeReview(ctx, cmd.CodeReviewId)
+	_, err := s.refreshCodeReview(ctx, cmd.CodeReviewId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to refresh code review")
 	}
 
-	s.dbMutex.Lock()
-	defer s.dbMutex.Unlock()
+	return &proto.CommandResponse{}, nil
+}
 
-	// Code review may have changed by the state machine
-	err = s.storeCodeReview(codeReview)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to store refreshed code review")
+func (s *WorkboardServer) RefreshReviews(ctx context.Context, cmd *proto.RefreshReviewsCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewIds", cmd.CodeReviewIds)
+	logger.Info("RefreshReviews")
+
+	if len(cmd.CodeReviewIds) <= 0 {
+		return nil, errors.New("RefreshReviewsCommand.code_review_ids must not be empty")
+	}
+	const maxNumReviews = 20
+	if len(cmd.CodeReviewIds) > maxNumReviews {
+		return nil, errors.Errorf("RefreshReviewsCommand.code_review_ids only allows %d reviews at once", maxNumReviews)
+	}
+
+	for _, codeReviewId := range cmd.CodeReviewIds {
+		_, err := s.refreshCodeReview(ctx, codeReviewId)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to refresh code review")
+		}
 	}
 
 	return &proto.CommandResponse{}, nil
