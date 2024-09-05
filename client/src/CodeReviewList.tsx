@@ -137,6 +137,16 @@ type CodeReviewGroup = {
   sortedCodeReviews: CodeReview[];
 };
 
+function hashCode(str: string): number {
+  let hash = 0;
+  for (let i = 0, len = str.length; i < len; i++) {
+    let chr = str.charCodeAt(i);
+    hash = (hash << 5) - hash + chr;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return hash;
+}
+
 function simplePlural(count: number, singular: string) {
   if (count == 1) {
     return singular;
@@ -255,6 +265,79 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       clearInterval(this.refreshIntervalCancel);
       this.refreshIntervalCancel = undefined;
     }
+  }
+
+  shouldComponentUpdate(
+    _nextProps: {},
+    nextState: Readonly<CodeReviewListState>,
+  ): boolean {
+    // Do not hash `codeReviewsGrpcResult` because we generate a to-be-rendered, sorted list from it
+
+    let beforeHash = 0;
+    let afterHash = 0;
+
+    if (
+      this.state.codeReviewIdsWithActiveCommands.size !=
+        nextState.codeReviewIdsWithActiveCommands.size ||
+      this.state.codeReviewGroups?.length != nextState.codeReviewGroups?.length
+    ) {
+      return true;
+    }
+
+    for (const codeReviewId of this.state.codeReviewIdsWithActiveCommands) {
+      beforeHash =
+        ((beforeHash << 5) - beforeHash + hashCode(codeReviewId)) & 0xffffffff;
+    }
+    for (const codeReviewId of nextState.codeReviewIdsWithActiveCommands) {
+      afterHash =
+        ((afterHash << 5) - afterHash + hashCode(codeReviewId)) & 0xffffffff;
+    }
+
+    if (beforeHash != afterHash) {
+      return true;
+    }
+
+    for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
+      beforeHash =
+        ((beforeHash << 5) -
+          beforeHash +
+          hashCode(codeReviewGroup.groupTypeStrWithoutOrderPrefix) +
+          codeReviewGroup.sortedCodeReviews.length) &
+        0xffffffff;
+    }
+    for (const codeReviewGroup of nextState.codeReviewGroups ?? []) {
+      afterHash =
+        ((afterHash << 5) -
+          afterHash +
+          hashCode(codeReviewGroup.groupTypeStrWithoutOrderPrefix) +
+          codeReviewGroup.sortedCodeReviews.length) &
+        0xffffffff;
+    }
+
+    if (beforeHash != afterHash) {
+      return true;
+    }
+
+    for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
+      for (const codeReview of codeReviewGroup.sortedCodeReviews) {
+        beforeHash =
+          ((beforeHash << 5) - beforeHash + codeReview.lastRefreshedTimestamp) &
+          0xffffffff;
+      }
+    }
+    for (const codeReviewGroup of nextState.codeReviewGroups ?? []) {
+      for (const codeReview of codeReviewGroup.sortedCodeReviews) {
+        afterHash =
+          ((afterHash << 5) - afterHash + codeReview.lastRefreshedTimestamp) &
+          0xffffffff;
+      }
+    }
+
+    if (beforeHash != afterHash) {
+      return true;
+    }
+
+    return false;
   }
 
   // Calculate how often and how many code reviews at once should be auto-refreshed. For a larger
