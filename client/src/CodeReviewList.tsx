@@ -1035,6 +1035,21 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               />
                             )}
 
+                            {codeReview.githubFields?.isDraft && (
+                              <img
+                                className="code-review-pipeline-status"
+                                src="/memo-pencil.svg"
+                                title="PR is a draft"
+                              />
+                            )}
+                            {codeReview.githubFields?.willAutoMerge && (
+                              <img
+                                className="code-review-pipeline-status"
+                                src="/code-merge.svg"
+                                title="PR has auto-merge enabled"
+                              />
+                            )}
+
                             <a
                               href={codeReview.githubFields?.url || ''}
                               className="pr-link"

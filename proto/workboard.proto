@@ -86,7 +86,9 @@ message GitHubPullRequestFields {
   GitHubPullRequestStatus status = 3;
   string status_check_rollup_status = 7;
 
+  bool is_draft = 8;
   int64 updated_at_timestamp = 5;
+  bool will_auto_merge = 9;
 }
 
 message GitHubRepo {
