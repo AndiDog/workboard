@@ -974,9 +974,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                     </button>
                   )}
                   <span class="statistics">
-                    {numCodeReviews}{' '}
-                    {simplePlural(numCodeReviews, 'code review')},{' '}
-                    {numSnoozedCodeReviews} snoozed
+                    {numCodeReviews - numSnoozedCodeReviews}{' '}
+                    {simplePlural(numCodeReviews, 'code review')} (
+                    {numSnoozedCodeReviews} snoozed, {numCodeReviews} total)
                   </span>
                   {this.state.codeReviewIdsWithActiveCommands.size > 0 && (
                     <Spinner />
