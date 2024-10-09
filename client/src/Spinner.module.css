@@ -1,0 +1,31 @@
+/* CSS-only spinner from https://loading.io/css/ */
+.ldsDualRing,
+.ldsDualRing:after {
+  box-sizing: border-box;
+}
+.ldsDualRing {
+  display: inline-block;
+  width: 1.25em;
+  height: 1.25em;
+  margin: 0 0.25em;
+  vertical-align: middle;
+}
+.ldsDualRing:after {
+  content: ' ';
+  display: block;
+  width: 1em;
+  height: 1em;
+  margin: 0.125em;
+  border-radius: 50%;
+  border: 0.1em solid currentColor;
+  border-color: currentColor transparent currentColor transparent;
+  animation: ldsDualRing 1.2s linear infinite;
+}
+@keyframes ldsDualRing {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}

@@ -3,10 +3,179 @@ syntax = "proto3";
 package workboard;
 option go_package = "andidog.de/workboard/proto";
 
+// MESSAGES
+
+message CodeReviewRenderOnlyFields {
+  // These fields depend on configuration and don't represent the code review
+  // itself. For example, `author_is_self` depends for which user the code
+  // reviews are listed.
+  bool author_is_self = 1;
+
+  // Can be empty
+  string avatar_url = 2;
+}
+
+// Pull/merge request on a platform like GitHub
+message CodeReview {
+  // Unique ID, e.g. GitHub URL. No assumptions can be made on the value format
+  // - if the GitHub URL is needed, look into `github_fields`.
+  string id = 1;
+
+  CodeReviewStatus status = 3;
+
+  GitHubPullRequestFields github_fields = 2;
+
+  CodeReviewRenderOnlyFields render_only_fields = 4;
+
+  // Last change to workboard status by the user. Can be zero if newly imported.
+  int64 last_changed_timestamp = 5;
+
+  int64 last_refreshed_timestamp = 11;
+
+  // Last update of the code review on the platform (e.g. GitHub). Can be zero
+  // if not known.
+  int64 last_updated_timestamp = 9;
+
+  // Last visit by click on link from workboard UI. Used to mark the last few
+  // in order to recognize them faster when coming back to the workboard
+  // browser tab.
+  int64 last_visited_timestamp = 12;
+
+  // Code reviews must be kept longer in the database even in "deleted" status,
+  // since a search e.g. on GitHub may find them again (especially, but not
+  // only, once they're reopened).
+  int64 delete_after_timestamp = 10;
+
+  // These are only used in case of certain `status` value
+  int64 snooze_until_updated_at_changed_from = 6;
+  int64 bring_back_to_review_if_not_merged_until_timestamp = 7;
+  int64 snooze_until_timestamp = 8;
+}
+
+enum CodeReviewStatus {
+  CODE_REVIEW_STATUS_UNSPECIFIED = 0;
+
+  CODE_REVIEW_STATUS_ARCHIVED = 12;
+  CODE_REVIEW_STATUS_CLOSED = 7;
+  CODE_REVIEW_STATUS_DELETED = 11;
+  CODE_REVIEW_STATUS_MERGED = 2;
+  CODE_REVIEW_STATUS_MUST_REVIEW = 5;
+  CODE_REVIEW_STATUS_NEW = 1;
+  CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE = 6;
+  CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED = 10;
+  CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME = 3;
+  CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE = 4;
+  CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE = 9;
+}
+
+enum GitHubPullRequestStatus {
+  GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED = 0;
+
+  GITHUB_PULL_REQUEST_STATUS_CLOSED = 2;
+  GITHUB_PULL_REQUEST_STATUS_MERGED = 3;
+  GITHUB_PULL_REQUEST_STATUS_OPEN = 1;
+}
+
+message GitHubPullRequestFields {
+  string url = 1;
+  string title = 4;
+  int64 number = 6;
+
+  GitHubRepo repo = 2;
+
+  GitHubPullRequestStatus status = 3;
+  string status_check_rollup_status = 7;
+
+  bool is_draft = 8;
+  int64 updated_at_timestamp = 5;
+  bool will_auto_merge = 9;
+}
+
+message GitHubRepo {
+  string organization_name = 1;
+
+  string name = 2;
+}
+
+// QUERIES
+
+message GetCodeReviewsQuery {}
+
+message GetCodeReviewsResponse {
+  repeated CodeReview code_reviews = 1;
+}
+
+// COMMANDS
+
 message CommandResponse {}
 
-message MarkReviewedCommand {}
+message DeleteReviewCommand {
+  string code_review_id = 1;
+}
+
+message MarkMustReviewCommand {
+  string code_review_id = 1;
+}
+
+message MarkVisitedCommand {
+  string code_review_id = 1;
+}
+
+message RefreshReviewCommand {
+  string code_review_id = 1;
+}
+
+message RefreshReviewsCommand {
+  repeated string code_review_ids = 1;
+}
+
+message RelistReviewsCommand {}
+
+message ReviewedDeleteOnMergeCommand {
+  string code_review_id = 1;
+}
+
+message SnoozeUntilMentionedCommand {
+  string code_review_id = 1;
+}
+
+message SnoozeUntilTimeCommand {
+  string code_review_id = 1;
+
+  int64 snooze_until_timestamp = 2;
+}
+
+message SnoozeUntilUpdateCommand {
+  string code_review_id = 1;
+}
 
 service Workboard {
-  rpc MarkReviewed(MarkReviewedCommand) returns (CommandResponse) {}
+  rpc DeleteReview(DeleteReviewCommand) returns (CommandResponse) {}
+
+  rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
+
+  rpc MarkMustReview(MarkMustReviewCommand) returns (CommandResponse) {}
+
+  rpc MarkVisited(MarkVisitedCommand) returns (CommandResponse) {}
+
+  // Query providers (e.g. GitHub) for for new list of code reviews.
+  // This does not refresh single code reviews which were already known in the
+  // database, but loads details for any not-yet-known reviews.
+  rpc RelistReviews(RelistReviewsCommand) returns (CommandResponse) {}
+
+  // Refresh single code review
+  rpc RefreshReview(RefreshReviewCommand) returns (CommandResponse) {}
+
+  // Refresh many code reviews at once
+  rpc RefreshReviews(RefreshReviewsCommand) returns (CommandResponse) {}
+
+  rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
+      returns (CommandResponse) {}
+
+  rpc SnoozeUntilMentioned(SnoozeUntilMentionedCommand)
+      returns (CommandResponse) {}
+
+  rpc SnoozeUntilTime(SnoozeUntilTimeCommand) returns (CommandResponse) {}
+
+  rpc SnoozeUntilUpdate(SnoozeUntilUpdateCommand) returns (CommandResponse) {}
 }

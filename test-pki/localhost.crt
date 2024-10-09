@@ -1,0 +1,93 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 4096 (0x1000)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C=DE, ST=Nowhere, L=Nowhere, O=Nowhere, OU=Nowhere, CN=workboard-test-pki-ca
+        Validity
+            Not Before: Jul 24 20:28:48 2024 GMT
+            Not After : Oct 27 20:28:48 2026 GMT
+        Subject: C=DE, ST=Nowhere, O=Nowhere, OU=Nowhere, CN=localhost
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:dc:c0:01:65:53:45:fd:75:58:b5:19:fb:a2:e3:
+                    06:e1:c7:6b:cf:bb:bf:71:5c:f1:0a:b1:b2:68:c3:
+                    78:0d:9d:3e:aa:fc:b2:bf:17:72:9d:ad:40:eb:fc:
+                    a6:48:ed:b5:f8:e2:b3:88:ee:e1:57:de:92:e7:9d:
+                    f4:a3:eb:86:bc:d4:47:0a:2c:a2:98:22:a9:b8:04:
+                    cf:ed:8e:0c:e3:28:94:e4:38:79:bc:33:ae:fe:86:
+                    53:36:9b:ee:bd:3e:71:2a:d8:45:26:53:58:06:60:
+                    43:e8:61:19:6f:bc:2e:12:f2:cc:08:32:46:89:a5:
+                    d5:a6:97:eb:60:6c:9a:e8:10:0d:a1:b4:da:97:7e:
+                    0c:0b:b4:c8:04:88:dd:08:5b:33:f1:5f:39:3d:82:
+                    4f:ae:e4:ca:e2:69:6a:cc:5c:ed:c9:7c:df:8c:ef:
+                    17:50:da:b9:c5:15:a4:ce:e6:0b:d6:15:ea:5a:d0:
+                    74:52:6f:13:be:be:a6:3a:22:8c:c0:f8:dd:6d:ac:
+                    18:67:5d:d9:26:fa:db:4f:91:6e:57:4f:6b:4a:ba:
+                    af:e3:63:fd:a7:ba:7c:b5:b2:f9:c4:02:30:bb:4a:
+                    65:ee:18:e9:d8:74:af:aa:4a:1d:8f:14:f8:73:12:
+                    de:11:c1:3f:8c:d3:5c:c2:47:66:04:47:9c:fb:ba:
+                    50:a7
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            Netscape Cert Type: 
+                SSL Server
+            X509v3 Subject Key Identifier: 
+                08:29:3E:53:A0:DD:DC:61:59:8B:AC:6A:E9:6E:47:91:00:DE:47:35
+            X509v3 Authority Key Identifier: 
+                keyid:41:0A:26:FC:B6:8C:51:23:11:F1:C0:3B:57:27:A6:F8:BD:5B:4B:E0
+                DirName:/C=DE/ST=Nowhere/L=Nowhere/O=Nowhere/OU=Nowhere/CN=workboard-test-pki-ca
+                serial:2A:B6:DD:94:48:E3:D9:77:6D:DC:88:9F:99:D5:55:60:63:90:F5:3D
+            X509v3 Key Usage: critical
+                Digital Signature, Key Encipherment
+            X509v3 Extended Key Usage: 
+                TLS Web Server Authentication
+            X509v3 Subject Alternative Name: 
+                DNS:localhost
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        9b:e9:ff:82:f3:db:4b:9a:08:43:1a:7c:d5:df:e8:20:ae:01:
+        8d:ba:5a:ae:8c:21:a5:55:88:8f:9e:0c:eb:3f:91:10:49:c3:
+        42:fe:39:7f:5c:c9:6a:9e:e6:a0:b1:a7:18:dd:8c:c3:c2:c0:
+        50:54:9a:ea:94:f3:05:5d:17:05:b8:1c:f9:a0:54:f2:bb:40:
+        ac:2f:fb:a7:03:71:45:0f:dd:23:79:4b:69:21:fe:c5:6e:a5:
+        31:88:cd:87:bf:89:c8:94:14:88:bc:b3:84:08:0c:e0:29:27:
+        6e:50:97:44:15:51:0a:5e:03:fb:6f:9b:e3:03:56:5b:b4:be:
+        03:81:07:ed:2f:58:9a:2f:c6:cb:1a:03:80:6a:1c:a2:90:5f:
+        41:7a:b7:a9:1d:25:6b:b4:b3:13:11:f6:43:e4:3f:29:77:97:
+        31:03:34:f6:1d:ed:54:2b:90:64:2f:cb:13:72:07:88:02:ed:
+        9a:5b:e7:88:03:89:58:ac:e4:94:17:f2:b6:78:6d:7c:d3:12:
+        62:50:55:f7:c5:2a:f3:b2:35:77:57:2b:0f:3d:e4:65:d4:07:
+        f0:c0:91:c2:01:ef:5d:9c:9e:8c:54:8f:f6:ca:2f:18:21:4f:
+        68:3d:f3:d9:71:97:4d:3d:70:0a:35:ac:58:49:66:5d:80:71:
+        4e:34:97:8a
+-----BEGIN CERTIFICATE-----
+MIIEezCCA2OgAwIBAgICEAAwDQYJKoZIhvcNAQELBQAwdTELMAkGA1UEBhMCREUx
+EDAOBgNVBAgMB05vd2hlcmUxEDAOBgNVBAcMB05vd2hlcmUxEDAOBgNVBAoMB05v
+d2hlcmUxEDAOBgNVBAsMB05vd2hlcmUxHjAcBgNVBAMMFXdvcmtib2FyZC10ZXN0
+LXBraS1jYTAeFw0yNDA3MjQyMDI4NDhaFw0yNjEwMjcyMDI4NDhaMFcxCzAJBgNV
+BAYTAkRFMRAwDgYDVQQIDAdOb3doZXJlMRAwDgYDVQQKDAdOb3doZXJlMRAwDgYD
+VQQLDAdOb3doZXJlMRIwEAYDVQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEB
+AQUAA4IBDwAwggEKAoIBAQDcwAFlU0X9dVi1Gfui4wbhx2vPu79xXPEKsbJow3gN
+nT6q/LK/F3KdrUDr/KZI7bX44rOI7uFX3pLnnfSj64a81EcKLKKYIqm4BM/tjgzj
+KJTkOHm8M67+hlM2m+69PnEq2EUmU1gGYEPoYRlvvC4S8swIMkaJpdWml+tgbJro
+EA2htNqXfgwLtMgEiN0IWzPxXzk9gk+u5MriaWrMXO3JfN+M7xdQ2rnFFaTO5gvW
+Fepa0HRSbxO+vqY6IozA+N1trBhnXdkm+ttPkW5XT2tKuq/jY/2nuny1svnEAjC7
+SmXuGOnYdK+qSh2PFPhzEt4RwT+M01zCR2YER5z7ulCnAgMBAAGjggExMIIBLTAJ
+BgNVHRMEAjAAMBEGCWCGSAGG+EIBAQQEAwIGQDAdBgNVHQ4EFgQUCCk+U6Dd3GFZ
+i6xq6W5HkQDeRzUwgbIGA1UdIwSBqjCBp4AUQQom/LaMUSMR8cA7Vyem+L1bS+Ch
+eaR3MHUxCzAJBgNVBAYTAkRFMRAwDgYDVQQIDAdOb3doZXJlMRAwDgYDVQQHDAdO
+b3doZXJlMRAwDgYDVQQKDAdOb3doZXJlMRAwDgYDVQQLDAdOb3doZXJlMR4wHAYD
+VQQDDBV3b3JrYm9hcmQtdGVzdC1wa2ktY2GCFCq23ZRI49l3bdyIn5nVVWBjkPU9
+MA4GA1UdDwEB/wQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcDATAUBgNVHREEDTAL
+gglsb2NhbGhvc3QwDQYJKoZIhvcNAQELBQADggEBAJvp/4Lz20uaCEMafNXf6CCu
+AY26Wq6MIaVViI+eDOs/kRBJw0L+OX9cyWqe5qCxpxjdjMPCwFBUmuqU8wVdFwW4
+HPmgVPK7QKwv+6cDcUUP3SN5S2kh/sVupTGIzYe/iciUFIi8s4QIDOApJ25Ql0QV
+UQpeA/tvm+MDVlu0vgOBB+0vWJovxssaA4BqHKKQX0F6t6kdJWu0sxMR9kPkPyl3
+lzEDNPYd7VQrkGQvyxNyB4gC7Zpb54gDiVis5JQX8rZ4bXzTEmJQVffFKvOyNXdX
+Kw895GXUB/DAkcIB712cnoxUj/bKLxghT2g989lxl009cAo1rFhJZl2AcU40l4o=
+-----END CERTIFICATE-----

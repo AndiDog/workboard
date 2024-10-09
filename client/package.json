@@ -1,0 +1,27 @@
+{
+  "name": "workboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run proto && vite",
+    "build": "npm run proto && tsc -b && vite build",
+    "preview": "vite preview",
+    "proto": "find src/generated \\( -name '*.js' -o -name '*.ts' \\) -delete && PATH=\"./node_modules/.bin:$PATH\" `# for protoc-gen-ts` protoc -I ../proto ../proto/workboard.proto --ts_out=src/generated --ts_opt=json_names,no_namespace,target=web && printf '// @ts-nocheck\n%s' \"$(cat src/generated/workboard.ts)\" > src/generated/workboard.ts"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.9.13",
+    "google-protobuf": "^3.21.2",
+    "grpc-web": "^1.5.0",
+    "preact": "^10.22.1",
+    "safecolor": "^1.0.1",
+    "timeago.js": "^4.0.2"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.7.0",
+    "prettier": "3.3.3",
+    "protoc-gen-ts": "^0.8.7",
+    "typescript": "^5.2.2",
+    "vite": "^5.3.4"
+  }
+}

@@ -35,16 +35,39 @@ That said, [I](https://github.com/AndiDog) am making this application **open sou
 
 ## Development
 
+### Server
+
 ```sh
 # Once
 brew install protoc-gen-go protoc-gen-go-grpc
+echo 'TEST_GITHUB_USER=FILL_IN_YOUR_USERNAME` > server/.env-local
 
 # Server
 make server-watch
+```
 
-# Client
-LOGLEVEL=debug ./watch
-open "http://localhost:16666/" # best pin this tab in your browser
+To debug in Visual Studio Code, create a regular Go launch configuration with `"program": "server/main.go"`. Cancel the `make server-watch` command and instead run or debug the server from the editor.
+
+### Client
+
+Ensure your browser trusts the CA certificate (`test-pki/ca/ca.crt`) or else you'll get errors (gRPC request fails in browser, server logs something like `http: TLS handshake error from 127.0.0.1:57598: remote error: tls: unknown certificate authority`).
+
+```sh
+cd client
+
+# Once
+brew install protoc-gen-grpc-web # macOS (else get it from https://github.com/grpc/grpc-web)
+npm install
+
+make client-watch
+```
+
+### protobuf
+
+Rather than having to restart the above `make` processes, you can watch protobuf file changes which should automatically rebuild in the above processes.
+
+```sh
+make proto-watch
 ```
 
 ## Possible future features
@@ -58,3 +81,11 @@ open "http://localhost:16666/" # best pin this tab in your browser
 The software is free to use. The code may be used freely, except for the creation of, or integration into, commercial products (in short: I don't want GitHub or other platforms to steal my idea without appropriate compensation).
 
 A clearer legal license text may be added later.
+
+The following libraries and resources are used, thank you to the authors!
+
+- IconDuck icons ([CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/deed.en))
+
+  - [Dazzle UI Icon Library](https://iconduck.com/sets/dazzle-ui-icon-library)
+
+- [SafeColor](https://github.com/jessuni/SafeColor) ([MIT license](./client/src/vendor/safecolor/LICENSE))

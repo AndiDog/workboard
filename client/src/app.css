@@ -1,0 +1,315 @@
+body {
+  font-family: 'Open Sans', Arial, sans-serif;
+  margin: 0;
+}
+
+table {
+  padding: 0;
+  border-collapse: collapse;
+  border: none;
+}
+
+table.pull-requests {
+  max-width: 120em;
+  margin-bottom: 1.5em;
+}
+
+table.pull-requests tr {
+  border-bottom: 1px solid #aaa;
+}
+
+table.pull-requests tr.recently-changed {
+  background-color: #c0f0fb;
+}
+
+table.pull-requests tr.very-recently-changed {
+  background-color: #1ecbf3;
+}
+
+table.pull-requests tr.recently-visited {
+  background-color: #ffe2fe;
+}
+
+table.pull-requests tr.very-recently-visited {
+  background-color: #ffbcfd;
+}
+
+.pull-requests thead {
+  position: sticky;
+  top: 0;
+  border-bottom: 2px solid black;
+}
+.pull-requests thead tr {
+  box-shadow: 0 0 0.5em 0 rgba(0, 0, 0, 0.6);
+}
+
+/*
+  Fixed width percentages so the table doesn't jump around so much on automatic
+  code review refreshes
+*/
+.pull-requests-repo {
+  width: 20%;
+}
+.pull-requests-status {
+  width: 7%;
+}
+.pull-requests-github-status {
+  width: 5%;
+}
+.pull-requests-actions {
+  width: 63%;
+}
+.pull-requests-last-updated {
+  width: 5%;
+}
+
+.global-code-reviews-actions {
+  display: inline-block;
+  margin-left: 1em;
+}
+
+.global-code-reviews-actions button {
+  margin-right: 0.75em;
+}
+
+.statistics {
+  color: #666;
+  font-weight: normal;
+  margin-left: 0.75em;
+}
+
+td,
+th {
+  padding: 0.25rem 0.75rem;
+}
+
+th {
+  background-color: #eee;
+  font-weight: bold;
+  text-align: left;
+}
+
+.pr-link,
+.pr-link:visited {
+  /* Text color is set using safecolor */
+  font-weight: 600;
+  text-decoration: none;
+}
+.pr-link:hover {
+  text-decoration: underline;
+}
+
+.repo-name {
+  font-family: 'DejaVu Sans Mono', monospace;
+}
+
+tr.code-review-group {
+  font-size: 1.2em;
+  font-weight: bold;
+}
+
+tr.code-review-group-type-merged-or-updated {
+  background: repeating-linear-gradient(
+    315deg,
+    #72de6c 0,
+    #72de6c 1em,
+    #52d14c 1em,
+    #52d14c 1.2em,
+    #72de6c 1.2em
+  );
+  color: black;
+}
+
+tr.code-review-group-type-must-review {
+  background: repeating-linear-gradient(
+    315deg,
+    #f6d30b 0,
+    #f6d30b 1em,
+    #ccc 1em,
+    #ccc 1.2em,
+    #f6d30b 1.2em
+  );
+  color: black;
+}
+
+tr.code-review-group-type-rest {
+  background: repeating-linear-gradient(
+    315deg,
+    #24b6de 0,
+    #24b6de 1em,
+    #999 1em,
+    #999 1.2em,
+    #24b6de 1.2em
+  );
+}
+
+tr.code-review-group-type-reviewed {
+  background: repeating-linear-gradient(
+    315deg,
+    #cbead0 0,
+    #cbead0 1em,
+    #98c19b 1em,
+    #98c19b 2em,
+    #cbead0 2em
+  );
+  color: gray;
+}
+
+tr.code-review-group-type-snoozed {
+  background: repeating-linear-gradient(
+    315deg,
+    #f0f0f0 0,
+    #f0f0f0 1em,
+    #ddd 1em,
+    #ddd 1.2em,
+    #f0f0f0 1.2em
+  );
+  color: gray;
+}
+
+td.status {
+  /*
+   Rather grow vertically to display the status than having the table colum sizes jump from small to large,
+   disturbing the user's visual overview.
+   */
+  width: 8em;
+}
+
+td.github-status {
+  /*
+   Rather grow vertically to display the status than having the table colum sizes jump from small to large,
+   disturbing the user's visual overview.
+   */
+  width: 4em;
+}
+
+td.status-archived {
+  background-color: #d5b826dd;
+}
+
+td.status-closed {
+  background-color: #d53d26dd;
+}
+
+td.status-merged {
+  background-color: #ccffccdd;
+}
+
+td.status-must-review {
+  background-color: #f7f200dd;
+}
+
+tr.status-reviewed-delete-on-merge,
+tr.status-snoozed-until-mentioned,
+tr.status-snoozed-until-time,
+tr.status-snoozed-until-update {
+  opacity: 0.55;
+}
+
+td.status-reviewed-delete-on-merge,
+td.status-snoozed-until-mentioned,
+td.status-snoozed-until-time,
+td.status-snoozed-until-update {
+  background-color: #dddddddd;
+  color: #999;
+}
+
+td.status-unknown {
+  background-color: #f2f2f2dd; /* PR not known yet */
+}
+
+td.status-updated-after-snooze {
+  background-color: #ccffccdd;
+  font-weight: bold;
+}
+
+.actions {
+  /* Align buttons */
+  display: flex;
+
+  margin-top: 0.5em;
+}
+
+.actions button,
+.actions select {
+  margin-right: 0.75em;
+  border: 1px solid #ccc;
+  background-color: #f6f6f6;
+  border-radius: 0.3em;
+  padding: 0.3em 0.8em;
+  color: #444;
+}
+.actions button:hover {
+  background-color: #ccc;
+  border: 1px solid #333;
+  color: black;
+}
+.actions button:focus {
+  background-color: #c0c0c0;
+  border: 1px solid #222;
+  color: black;
+}
+
+.actions-disabled button,
+.actions-disabled select {
+  pointer-events: none;
+  border: 1px solid #eee;
+  color: #ddd;
+}
+
+.action-delete {
+  font-weight: bold;
+  color: #f20 !important;
+}
+
+.action-reviewed-delete-on-merge {
+  font-weight: bold;
+  color: #09b134 !important;
+}
+.actions-disabled .action-reviewed-delete-on-merge {
+  color: #9ac3a5 !important;
+}
+
+/* CSS-only spinner from https://loading.io/css/ */
+.lds-dual-ring,
+.lds-dual-ring:after {
+  box-sizing: border-box;
+}
+.lds-dual-ring {
+  display: inline-block;
+  width: 80px;
+  height: 80px;
+}
+.lds-dual-ring:after {
+  content: ' ';
+  display: block;
+  width: 64px;
+  height: 64px;
+  margin: 8px;
+  border-radius: 50%;
+  border: 6.4px solid currentColor;
+  border-color: currentColor transparent currentColor transparent;
+  animation: lds-dual-ring 1.2s linear infinite;
+}
+@keyframes lds-dual-ring {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.code-review-avatar {
+  width: 1.8em;
+  height: auto;
+  vertical-align: middle;
+  margin-right: 0.3em;
+}
+
+.code-review-pipeline-status {
+  width: 1.8em;
+  height: auto;
+  vertical-align: middle;
+  margin-right: 0.3em;
+}

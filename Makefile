@@ -1,6 +1,23 @@
+.PHONY: client-lint
+client-lint:
+	cd client && npm run build
+
+.PHONY: client-proto
+client-proto:
+	cd client && npm run proto
+
+.PHONY: client-watch
+client-watch: client-lint
+	cd client && npm run dev
+
 .PHONY: generate-server
 generate-server: proto/workboard.proto server/proto/gen.go
 	cd server && go generate ./...
+
+.PHONY: proto-watch
+proto-watch:
+	ls -1 proto/workboard.proto server/proto/gen.go \
+		| entr -ccr sh -c 'make client-proto generate-server && echo "Successfully regenerated from protobuf"'
 
 .PHONY: server
 server: generate-server server-lint
@@ -14,5 +31,5 @@ server-lint:
 server-watch: generate-server server-lint
 	cd server && ( \
 		find . -name go.mod -o -name go.sum -o -name "*.go" \
-			| entr -r sh -c '~/bin/cmd_k && go run main.go' \
+			| entr -ccr sh -c 'go run main.go' \
 	)
