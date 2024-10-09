@@ -104,42 +104,42 @@ th {
 }
 
 tr.code-review-group {
-  line-height: 0.8em;
+  font-size: 1.2em;
   font-weight: bold;
 }
 
 tr.code-review-group-type-merged-or-updated {
   background: repeating-linear-gradient(
     315deg,
-    #c4f1c4 0,
-    #c4f1c4 1em,
+    #72de6c 0,
     #72de6c 1em,
-    #72de6c 2em,
-    #c4f1c4 2em
+    #52d14c 1em,
+    #52d14c 1.2em,
+    #72de6c 1.2em
   );
-  color: green;
+  color: black;
 }
 
 tr.code-review-group-type-must-review {
   background: repeating-linear-gradient(
     315deg,
-    #ffffae 0,
-    #ffffae 1em,
+    #f6d30b 0,
     #f6d30b 1em,
-    #f6d30b 2em,
-    #ffffae 2em
+    #ccc 1em,
+    #ccc 1.2em,
+    #f6d30b 1.2em
   );
-  color: #867200;
+  color: black;
 }
 
 tr.code-review-group-type-rest {
   background: repeating-linear-gradient(
     315deg,
-    white 0,
-    white 1em,
-    #c4f1c4 1em,
-    #c4f1c4 2em,
-    white 2em
+    #24b6de 0,
+    #24b6de 1em,
+    #999 1em,
+    #999 1.2em,
+    #24b6de 1.2em
   );
 }
 
@@ -161,8 +161,8 @@ tr.code-review-group-type-snoozed {
     #f0f0f0 0,
     #f0f0f0 1em,
     #ddd 1em,
-    #ddd 2em,
-    #f0f0f0 2em
+    #ddd 1.2em,
+    #f0f0f0 1.2em
   );
   color: gray;
 }
