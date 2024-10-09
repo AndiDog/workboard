@@ -162,6 +162,10 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
   for (const codeReview of res.codeReviews) {
     let groupType: CodeReviewGroupType;
 
+    if (codeReview.status==CodeReviewStatus.CODE_REVIEW_STATUS_DELETED){
+      continue;
+    }
+
     if (
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
       codeReview.status ==
