@@ -2,19 +2,21 @@
 
 Working with GitHub e-mails failed to work for me due to overload. Working with GitHub notifications doesn't tell me which PR requires which action. I need an overview. This is an overview dashboard for GitHub PRs. For each PR, you can decide to snooze it (and automatically bring it back to the top of the list on updates, or after some time), mark for your review, etc.
 
-Technically, this is a very simple web application which makes cached calls to the [`gh` GitHub CLI](https://cli.github.com/) do read PR information.
+Technically, this is a very simple web application plus backend server. The server uses the GitHub API to read PR information.
 
 ## Running
 
 ```sh
-# GitHub CLI setup (installation instructions: https://cli.github.com/)
-gh auth login
-
-
 # One-time setup
-cp -i workboard.yaml.example workboard.yaml # and fill in your information into the configuration file
-python3 -m venv .venv --prompt workboard
-.venv/bin/pip install -r requirements.txt
+cat > server/.env-local <<EOF
+TEST_GITHUB_USER=FillInYourGitHubUserName
+WORKBOARD_GITHUB_TOKEN=ghp_FILL_IN_YOUR_GITHUB_API_TOKEN
+EOF
+
+# Start these in separate terminals (only development mode; no one-liner available right now)
+make proto-watch
+make server-watch
+make client-watch
 ```
 
 ## Usage
@@ -25,13 +27,19 @@ The application runs locally. Use the "Running" instructions above. That's it â€
 
 To add a GitHub PR manually, assign yourself to it. The "Assigned PRs" listing output is cached, so it may take a while for _workboard_ to list it.
 
-The expected way of using the tool is to reload it every few hours when you want to concentrate for a while on PRs. Then you go through the list one-by-one. The last-clicked PR is highlighted so you know where you previously left the browser tab. Please left-click the PR links in the table to make this feature work.
+The expected way of using the tool is to pin it as browser tab and regularly visit it. It will automatically refresh the list and each code review's state while you're actively looking at the web application (browser tab is active). You can go through the list one-by-one and perform the needed actions, for example "I reviewed or merged; delete once merged" after you submitted the review, so that the workboard entry gets unlisted automatically if the PR really gets merged, or comes back to the top of the list if it surprisingly doesn't get merged soon. The last-clicked PR is highlighted so you know where you previously left the browser tab. Please left-click the PR links in the table to make this feature work.
 
 ## Project purpose / reporting problems / contributing to the application
 
 This is a minor hobby project. It won't make money, and it won't raise a thriving community that I want to support long-term. Donations are welcome, but unrealistic to get for such a tool, and that's fine for me. I want the project to be helpful as-is, and get feedback about it in GitHub issues, in writing or by marking the repo with a GitHub star if you're actively using it.
 
 That said, [I](https://github.com/AndiDog) am making this application **open source** and **open for minor contributions, issue reports and feature requests**. However, it's **closed for major contributions**. In short, that means I will block any PRs that contain feature development because I don't want to invest the time to fix other people's inconsistent code. Nor do I want to rewrite or accept a solution that somebody came up with in their own head without discussing it in an issue in advance â€“ which may have led to a simpler solution, or not investing time at all. I'm happy to receive small bug fixes if the changes are very obvious and well-contained.
+
+## Possible future features / known problems
+
+- Search currently doesn't include GitHub teams of which you are a member, so PRs requesting review from those teams unfortunately aren't listed
+- GitHub issues
+- GitLab (issues and MRs)
 
 ## Development
 
@@ -40,7 +48,7 @@ That said, [I](https://github.com/AndiDog) am making this application **open sou
 ```sh
 # Once
 brew install protoc-gen-go protoc-gen-go-grpc
-echo 'TEST_GITHUB_USER=FILL_IN_YOUR_USERNAME` > server/.env-local
+# and create `server/.env-local` as shown above
 
 # Server
 make server-watch
@@ -69,12 +77,6 @@ Rather than having to restart the above `make` processes, you can watch protobuf
 ```sh
 make proto-watch
 ```
-
-## Possible future features
-
-- GitHub issues
-- GitLab (issues and MRs)
-- Wild dream: optional GMail API integration to mark all PR-related notification e-mails as read
 
 ## License
 
