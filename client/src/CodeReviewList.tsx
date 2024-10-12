@@ -32,6 +32,11 @@ type CodeReviewListState = {
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
 
   codeReviewIdsWithActiveCommands: Set<string>;
+
+  searchEnabled: boolean;
+  searchText: string;
+
+  // Don't forget to change `shouldComponentUpdate` when adding state fields!
 };
 
 const codeReviewStatusToStringMap: {
@@ -252,6 +257,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.state = {
       codeReviewGroups: undefined,
       codeReviewIdsWithActiveCommands: new Set(),
+      searchEnabled: false,
+      searchText: '',
     };
   }
 
@@ -283,7 +290,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     if (
       this.state.codeReviewIdsWithActiveCommands.size !=
         nextState.codeReviewIdsWithActiveCommands.size ||
-      this.state.codeReviewGroups?.length != nextState.codeReviewGroups?.length
+      this.state.codeReviewGroups?.length !=
+        nextState.codeReviewGroups?.length ||
+      this.state.searchEnabled != nextState.searchEnabled ||
+      this.state.searchText != nextState.searchText
     ) {
       return true;
     }
@@ -724,6 +734,19 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  onEnableSearch(event: Event) {
+    event.preventDefault();
+
+    this.setState(
+      {
+        searchEnabled: true,
+      },
+      () => {
+        document.getElementById('search-text')?.focus();
+      },
+    );
+  }
+
   onMarkMustReview(event: Event, codeReviewId: string) {
     event.preventDefault();
     this.runCommandOnSingleCodeReview(
@@ -773,6 +796,19 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         );
       },
     );
+  }
+
+  onSearchTextChange(newSearchText: string) {
+    // Disable and hide the search box if the user deletes the search text
+    let searchEnabled = true;
+    if (this.state.searchText != '' && newSearchText == '') {
+      searchEnabled = false;
+    }
+
+    this.setState({
+      searchEnabled,
+      searchText: newSearchText,
+    });
   }
 
   onSnoozeUntilMentioned(event: Event, codeReviewId: string) {
@@ -921,6 +957,25 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     });
   }
 
+  searchTextMatchesCodeReview(codeReview: CodeReview): boolean {
+    const codeReviewDesc =
+      (codeReview.githubFields?.url ?? '') +
+      ' ' +
+      (codeReview.githubFields?.title ?? '');
+
+    const searchWords = this.state.searchText
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((s) => s.trim().length > 0);
+    if (searchWords.length == 0) {
+      return true;
+    }
+
+    return searchWords.every(
+      (searchWord) => codeReviewDesc.toLowerCase().indexOf(searchWord) !== -1,
+    );
+  }
+
   render() {
     const nowTimestamp = Date.now() / 1000;
 
@@ -977,6 +1032,24 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                       {simplePlural(numDeletableCodeReviews, 'code review')}
                     </button>
                   )}
+                  {!this.state.searchEnabled && (
+                    <button onClick={(event) => this.onEnableSearch(event)}>
+                      🔍
+                    </button>
+                  )}
+                  {this.state.searchEnabled && (
+                    <input
+                      type="text"
+                      id="search-text"
+                      className="search-text"
+                      value={this.state.searchText}
+                      // Filter code reviews list on every typed letter, no need
+                      // for the user to press Enter key
+                      onInput={(event) =>
+                        this.onSearchTextChange(event.currentTarget.value)
+                      }
+                    />
+                  )}
                   <span class="statistics">
                     {numCodeReviews - numSnoozedCodeReviews}{' '}
                     {simplePlural(numCodeReviews, 'code review')} (
@@ -1030,7 +1103,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                   {codeReviewGroup.sortedCodeReviews.map(
                     (codeReview) =>
                       codeReview.status !=
-                        CodeReviewStatus.CODE_REVIEW_STATUS_DELETED && (
+                        CodeReviewStatus.CODE_REVIEW_STATUS_DELETED &&
+                      (!this.state.searchEnabled ||
+                        this.searchTextMatchesCodeReview(codeReview)) && (
                         <tr
                           key={codeReview.id}
                           className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-changed' : ' recently-changed') : nowTimestamp - codeReview.lastVisitedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastVisitedTimestamp <= 900 ? ' very-recently-visited' : ' recently-visited') : ''}`}

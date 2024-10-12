@@ -72,6 +72,10 @@ table.pull-requests tr.very-recently-visited {
   margin-right: 0.75em;
 }
 
+.search-text {
+  max-width: 12em;
+}
+
 .statistics {
   color: #666;
   font-weight: normal;
