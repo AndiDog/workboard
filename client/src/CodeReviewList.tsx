@@ -811,6 +811,15 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     });
   }
 
+  onSearchTextInputKeyDown(event: KeyboardEvent) {
+    if (event.key == 'Escape') {
+      this.setState({
+        searchEnabled: false,
+        searchText: '',
+      });
+    }
+  }
+
   onSnoozeUntilMentioned(event: Event, codeReviewId: string) {
     event.preventDefault();
     this.runCommandOnSingleCodeReview(
@@ -1047,6 +1056,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                       // for the user to press Enter key
                       onInput={(event) =>
                         this.onSearchTextChange(event.currentTarget.value)
+                      }
+                      onKeyDown={(event) =>
+                        this.onSearchTextInputKeyDown(event)
                       }
                     />
                   )}

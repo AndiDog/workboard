@@ -29,6 +29,10 @@ To add a GitHub PR manually, assign yourself to it. The "Assigned PRs" listing o
 
 The expected way of using the tool is to pin it as browser tab and regularly visit it. It will automatically refresh the list and each code review's state while you're actively looking at the web application (browser tab is active). You can go through the list one-by-one and perform the needed actions, for example "I reviewed or merged; delete once merged" after you submitted the review, so that the workboard entry gets unlisted automatically if the PR really gets merged, or comes back to the top of the list if it surprisingly doesn't get merged soon. The last-clicked PR is highlighted so you know where you previously left the browser tab. Please left-click the PR links in the table to make this feature work.
 
+### Search
+
+There's no hotkey yet, so click the button. Enter search terms to filter the list of code reviews. For example, search for `upd dep` to only show all code reviews similar to `Update dependency architect to v5.10.1`. All your search terms must be found in the code review description (URL etc.) in order to be listed. Press Escape or delete your search query to show all code reviews again.
+
 ## Project purpose / reporting problems / contributing to the application
 
 This is a minor hobby project. It won't make money, and it won't raise a thriving community that I want to support long-term. Donations are welcome, but unrealistic to get for such a tool, and that's fine for me. I want the project to be helpful as-is, and get feedback about it in GitHub issues, in writing or by marking the repo with a GitHub star if you're actively using it.
