@@ -304,6 +304,15 @@ td.status-updated-after-snooze {
   }
 }
 
+.code-review-group-collapse-expand {
+  width: 1.8em;
+  height: auto;
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0.3;
+  margin-left: 0.3em;
+}
+
 .code-review-avatar {
   width: 1.8em;
   height: auto;
