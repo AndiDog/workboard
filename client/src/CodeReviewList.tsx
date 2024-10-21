@@ -980,9 +980,19 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       return true;
     }
 
-    return searchWords.every(
-      (searchWord) => codeReviewDesc.toLowerCase().indexOf(searchWord) !== -1,
-    );
+    if (searchWords[0] == '!' && searchWords.length > 1) {
+      // Negated search
+      return !searchWords
+        .slice(1)
+        .every(
+          (searchWord) =>
+            codeReviewDesc.toLowerCase().indexOf(searchWord) !== -1,
+        );
+    } else {
+      return searchWords.every(
+        (searchWord) => codeReviewDesc.toLowerCase().indexOf(searchWord) !== -1,
+      );
+    }
   }
 
   render() {
