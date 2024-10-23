@@ -48,7 +48,7 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo string, existingCodeReviews map[string]*proto.CodeReview, gitHubUserSelf string, extraInfo ExtraInfoGraphQLQuery, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo string, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUserSelf string, extraInfo ExtraInfoGraphQLQuery, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	id := getWorkboardCodeReviewIdFromGitHubIssue(issue)
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
@@ -111,8 +111,11 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		BringBackToReviewIfNotMergedUntilTimestamp: 0,
 		SnoozeUntilTimestamp:                       0,
 	}
-	existingCodeReview, hasExistingCodeReview := existingCodeReviews[id]
-	if !hasExistingCodeReview {
+	existingCodeReview, err := getCodeReviewById(id)
+	if err != nil {
+		return nil, err
+	}
+	if existingCodeReview == nil {
 		codeReview.LastChangedTimestamp = issue.UpdatedAt.Time.Unix()
 
 		return codeReview, nil
@@ -374,7 +377,7 @@ type ExtraInfoGraphQLQuery struct {
 	} `graphql:"repository(owner: $owner, name: $name)"`
 }
 
-func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, existingCodeReviews map[string]*proto.CodeReview, gitHubUser string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUser string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
 	if err != nil {
 		return nil, err
@@ -408,7 +411,7 @@ func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, iss
 		logger.Warnw("Failed to delete obsolete avatar URL from database", "err", err)
 	}
 
-	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, existingCodeReviews, gitHubUser, extraInfo, logger)
+	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, getCodeReviewById, gitHubUser, extraInfo, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -469,31 +472,19 @@ func (s *WorkboardServer) getCodeReviews() (map[string]*proto.CodeReview, error)
 	return codeReviews, nil
 }
 
-func (s *WorkboardServer) relistCodeReviews(ctx context.Context) (map[string]*proto.CodeReview, error) {
+func (s *WorkboardServer) relistCodeReviews(ctx context.Context) error {
 	logger := s.logger
-
-	// Used for the whole function incl. loop bodies (see hints below)
-	var err error
-
-	codeReviews := map[string]*proto.CodeReview{}
-	ok, err := s.db.Get("code_reviews", &codeReviews)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		logger.Debug("No code reviews stored in database yet")
-	}
 
 	gitHubUser, err := s.getGitHubUser()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	logger = logger.With("gitHubUser", gitHubUser)
-	logger.Info("Refreshing code reviews")
+	logger.Info("Relisting code reviews")
 
 	client, _, err := s.ensureGitHubClient()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	alreadyUpdatedGithubPrUrls := map[string]bool{}
@@ -511,8 +502,6 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) (map[string]*pr
 		logger = logger.With("query", query)
 		logger.Debug("Querying GitHub PRs")
 
-		// Don't use `err :=` in this loop since we want to break out of the loop and store the current
-		// state on errors, requiring the outside `err` variable to be used.
 		var issues []*github.Issue
 		perPage := 1000
 		err = paginateGitHubResults(perPage, func(listOptions *github.ListOptions) (*github.Response, error) {
@@ -534,8 +523,7 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) (map[string]*pr
 		})
 		logger.Debug("Queried GitHub PRs")
 		if err != nil {
-			err = errors.Wrapf(err, "failed to search GitHub PRs for user %q", gitHubUser)
-			break
+			return errors.Wrapf(err, "failed to search GitHub PRs for user %q", gitHubUser)
 		}
 
 		for _, issue := range issues {
@@ -549,43 +537,39 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) (map[string]*pr
 			// responsive instead of taking minutes to display anything and hammering the
 			// GitHub API and others.
 			codeReviewId := getWorkboardCodeReviewIdFromGitHubIssue(issue)
-			if _, ok := codeReviews[codeReviewId]; ok {
+			// No lock needed here since we want to check only existence
+			var existingCodeReview *proto.CodeReview
+			existingCodeReview, err = s.getCodeReviewById(codeReviewId)
+			if err != nil {
+				break
+			}
+			if existingCodeReview != nil {
+				logger.Debug("Skipping already-known PR in relisting")
 				continue
 			}
 
 			logger := logger.With("url", *issue.HTMLURL)
 			logger.Debug("Fetching details for not-yet-known GitHub PR")
 			var codeReview *proto.CodeReview
-			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, codeReviews, gitHubUser, logger)
+			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, logger)
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to fetch GitHub PR details for refresh")
+				return errors.Wrap(err, "failed to fetch GitHub PR details for relist")
 			}
 			logger.Debug("Fetched details for not-yet-known GitHub PR")
 
-			codeReviews[codeReview.Id] = codeReview
-		}
+			logger.Debug("Storing code review")
+			s.dbMutex.Lock()
+			err = s.storeCodeReview(codeReview)
+			s.dbMutex.Unlock()
 
-		if err != nil {
-			break
-		}
-	}
-
-	logger.Debug("Storing refreshed code reviews")
-	storeErr := s.db.Set("code_reviews", &codeReviews)
-	if storeErr != nil {
-		if err == nil {
-			return nil, errors.Wrap(storeErr, "failed to store code reviews in database")
-		} else {
-			logger.Errorw("Failed to store code reviews in database", "err", storeErr)
+			if err != nil {
+				return errors.Wrap(err, "failed to store GitHub PR details from relist")
+			}
 		}
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Info("Refreshed code reviews")
-	return codeReviews, nil
+	logger.Info("Relisted code reviews")
+	return nil
 }
 
 // storeCodeReview stores the code review in the database.
@@ -653,22 +637,18 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 		return nil, errors.Wrap(err, "failed to get GitHub PR")
 	}
 
-	s.dbMutex.Lock()
-	defer s.dbMutex.Unlock()
-
-	codeReviews, err := s.getCodeReviews()
-	if err != nil {
-		return nil, err
-	}
-	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, codeReviews, gitHubUser, logger)
+	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch GitHub PR details")
 	}
 	logger.Debug("Queried details for GitHub PR")
-	codeReviews[codeReview.Id] = codeReview
-	err = s.db.Set("code_reviews", &codeReviews)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to store code reviews in database")
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
+
+	logger.Debug("Storing details for GitHub PR")
+	if err := s.storeCodeReview(codeReview); err != nil {
+		return nil, err
 	}
 
 	return codeReview, nil
@@ -752,7 +732,7 @@ func (s *WorkboardServer) RelistReviews(ctx context.Context, query *proto.Relist
 		logger.Warnw("Failed to delete deprecated database key", "err", err)
 	}
 
-	_, err = s.relistCodeReviews(ctx)
+	err = s.relistCodeReviews(ctx)
 	if err != nil {
 		logger.Errorw("Failed to refresh code reviews", "err", err)
 		return nil, err
