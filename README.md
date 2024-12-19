@@ -14,9 +14,14 @@ WORKBOARD_GITHUB_TOKEN=ghp_FILL_IN_YOUR_GITHUB_API_TOKEN
 EOF
 
 # Start these in separate terminals (only development mode; no one-liner available right now)
+# and open http://localhost:5174
 make proto-watch
 make server-watch
 make client-watch
+
+# Or start with docker-compose and open http://localhost:5175
+docker-compose up
+docker-compose up --build -w # for development
 ```
 
 ## Usage

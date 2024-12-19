@@ -23,6 +23,7 @@ import {
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
 import { RpcError } from 'grpc-web';
+import { grpcWebServerUrl } from './config';
 import ErrorBanner from './ErrorBanner';
 
 const safeColor = new SafeColor({ color: [255, 255, 255], contrast: 3 });
@@ -590,7 +591,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         ]),
       },
       () => {
-        let client = new WorkboardClient('https://localhost:16667');
+        let client = new WorkboardClient(grpcWebServerUrl);
 
         let numDone = 0;
 
@@ -637,7 +638,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         ]),
       },
       () => {
-        let client = new WorkboardClient('https://localhost:16667');
+        let client = new WorkboardClient(grpcWebServerUrl);
 
         runCommand(codeReviewIds, client, (error, res) => {
           const commandResult = toGrpcResult(error, res);
@@ -675,7 +676,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         ]),
       },
       () => {
-        let client = new WorkboardClient('https://localhost:16667');
+        let client = new WorkboardClient(grpcWebServerUrl);
         runCommand(client, (error, res) => {
           const commandResult = toGrpcResult(error, res);
           if (!commandResult.ok) {
@@ -922,7 +923,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   refetchCodeReview(codeReviewId: string) {
-    let client = new WorkboardClient('https://localhost:16667');
+    let client = new WorkboardClient(grpcWebServerUrl);
 
     const thiz = this;
     client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
@@ -948,7 +949,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   refresh(opts?: { removeCodeReviewIdsWithActiveCommands?: Array<string> }) {
     const thiz = this;
     this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
-      let client = new WorkboardClient('https://localhost:16667');
+      let client = new WorkboardClient(grpcWebServerUrl);
 
       client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
         let codeReviewGroups: CodeReviewGroup[] | undefined =
@@ -976,7 +977,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   relist() {
-    let client = new WorkboardClient('https://localhost:16667');
+    let client = new WorkboardClient(grpcWebServerUrl);
 
     client.RelistReviews(new RelistReviewsCommand(), null, (error, res) => {
       const commandResult = toGrpcResult(error, res);

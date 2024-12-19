@@ -1,0 +1,16 @@
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /app/server
+
+COPY server/go.mod server/go.sum /app/server/
+RUN go mod download
+
+COPY server /app/server
+RUN go build -o workboard-server .
+
+FROM gcr.io/distroless/static
+COPY test-pki/localhost* /app/test-pki/
+COPY server/.env.docker-compose /app/server/.env
+COPY --from=builder /app/server/workboard-server /usr/bin/
+WORKDIR /app/server
+CMD ["/usr/bin/workboard-server"]

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -40,8 +41,10 @@ func main() {
 	}
 	err := godotenv.Load(envFiles...)
 	if err != nil {
-		log.Fatalf("Error loading env files (%v)", envFiles)
+		cwd, _ := os.Getwd()
+		log.Fatalf("Error loading env files (%v; working directory %q)", envFiles, cwd)
 	}
+	logger.Infow("Loaded env files", "envFiles", envFiles)
 
 	// Database
 	databaseDir := os.Getenv("DATABASE_DIR")
@@ -65,6 +68,7 @@ func main() {
 	if err != nil {
 		logger.Fatalw("Failed to open database", "databaseDir", databaseDir, "err", err)
 	}
+	logger.Infow("Opened database", "databaseDir", databaseDir)
 
 	// gRPC setup (TODO: only keep gRPC-Web)
 	grpcListenAddress := os.Getenv("GRPC_LISTEN_STRING")
@@ -83,13 +87,14 @@ func main() {
 	}
 	proto.RegisterWorkboardServer(grpcServer, workboardServer)
 
-	gprcWebAllowedCorsOrigin := os.Getenv("GPRC_WEB_ALLOWED_CORS_ORIGIN")
-	if gprcWebAllowedCorsOrigin == "" {
-		logger.Fatal("Missing GPRC_WEB_ALLOWED_CORS_ORIGIN environment variable")
+	gprcWebAllowedCorsOrigins := strings.Split(os.Getenv("GPRC_WEB_ALLOWED_CORS_ORIGINS"), ",")
+	gprcWebAllowedCorsOrigins = slices.DeleteFunc(gprcWebAllowedCorsOrigins, func(origin string) bool { return origin == "" })
+	if len(gprcWebAllowedCorsOrigins) == 0 {
+		logger.Fatal("Missing GPRC_WEB_ALLOWED_CORS_ORIGINS environment variable")
 	}
 	wrappedGrpcServer := grpcweb.WrapServer(grpcServer,
 		grpcweb.WithCorsForRegisteredEndpointsOnly(false),
-		grpcweb.WithOriginFunc(func(origin string) bool { return origin == gprcWebAllowedCorsOrigin }))
+		grpcweb.WithOriginFunc(func(origin string) bool { return slices.Contains(gprcWebAllowedCorsOrigins, origin) }))
 	handler := func(resp http.ResponseWriter, req *http.Request) {
 		wrappedGrpcServer.ServeHTTP(resp, req)
 	}

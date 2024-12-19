@@ -1,0 +1,8 @@
+**
+
+!/proto
+!/server
+!/test-pki
+
+# Private tokens don't belong in container build
+.env-local

@@ -1,0 +1,23 @@
+FROM node:23 AS builder
+RUN apt-get update -yq \
+    && apt-get install --no-install-recommends -y \
+        protobuf-compiler \
+    && curl -fsSLo /usr/local/bin/protoc-gen-grpc-web "https://github.com/grpc/grpc-web/releases/download/1.5.0/protoc-gen-grpc-web-1.5.0-linux-$(arch)" \
+    && chmod +x /usr/local/bin/protoc-gen-grpc-web
+COPY client/package.json client/package-lock.json /usr/src/app/client/
+WORKDIR /usr/src/app/client
+# Can't do `--omit=dev` because it leads to `@rollup` missing on build
+RUN npm ci
+COPY proto/ /usr/src/app/proto/
+COPY client/ /usr/src/app/client/
+RUN mv src/config.docker-compose.ts src/config.ts \
+    && npm run build
+
+FROM node:23
+
+RUN npm install serve -g
+
+COPY --from=builder /usr/src/app/client/dist /usr/src/app/client/dist
+WORKDIR /usr/src/app/client
+CMD ["serve", "-s", "dist"]
+EXPOSE 5174
