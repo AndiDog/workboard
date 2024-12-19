@@ -99,7 +99,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 
 		// TODO Rather only fill these at render time, which was the purpose of the field
 		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
-			AuthorIsSelf: issue.User != nil && issue.User.Name != nil && *issue.User.Name == gitHubUserSelf,
+			AuthorIsSelf: issue.User != nil && issue.User.Login != nil && *issue.User.Login == gitHubUserSelf,
 			AvatarUrl:    conditionalUserAvatarUrl(&extraInfo, logger),
 		},
 
