@@ -79,6 +79,17 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		statusCheckRollupQueryState = extraInfo.Repository.PullRequest.Commits.Nodes[0].Commit.StatusCheckRollup.State
 	}
 
+	authorName := ""
+	if issue.User != nil && issue.User.Login != nil {
+		authorName = *issue.User.Login
+	}
+	if extraInfo.Repository.PullRequest.Author.Login != "" {
+		authorName = extraInfo.Repository.PullRequest.Author.Login
+	}
+	if issue.User != nil && issue.User.Name != nil {
+		authorName = *issue.User.Name
+	}
+
 	codeReview := &proto.CodeReview{
 		Id:     id,
 		Status: proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
@@ -100,6 +111,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		// TODO Rather only fill these at render time, which was the purpose of the field
 		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
 			AuthorIsSelf: issue.User != nil && issue.User.Login != nil && *issue.User.Login == gitHubUserSelf,
+			AuthorName:   authorName,
 			AvatarUrl:    conditionalUserAvatarUrl(&extraInfo, logger),
 		},
 

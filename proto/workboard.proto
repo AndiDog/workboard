@@ -11,6 +11,9 @@ message CodeReviewRenderOnlyFields {
   // reviews are listed.
   bool author_is_self = 1;
 
+  // Some display name of the code review author
+  string author_name = 3;
+
   // Can be empty
   string avatar_url = 2;
 }

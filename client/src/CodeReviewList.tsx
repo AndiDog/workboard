@@ -1255,6 +1255,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                             <img
                               className="code-review-avatar"
                               src={codeReview.renderOnlyFields.avatarUrl}
+                              title={codeReview.renderOnlyFields.authorName}
                             />
                           )}
 
