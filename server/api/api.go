@@ -441,7 +441,7 @@ func (s *WorkboardServer) getGitHubUser() (string, error) {
 		return "", err
 	}
 	if !ok || gitHubUser == "" {
-		gitHubUser := os.Getenv("TEST_GITHUB_USER")
+		gitHubUser = os.Getenv("TEST_GITHUB_USER")
 		if gitHubUser != "" {
 			err = s.db.Set("github_user", gitHubUser)
 			if err != nil {
