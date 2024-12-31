@@ -48,7 +48,7 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo string, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUserSelf string, extraInfo ExtraInfoGraphQLQuery, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo string, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUserSelf string, gitHubMentionTriggers []string, extraInfo ExtraInfoGraphQLQuery, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	id := getWorkboardCodeReviewIdFromGitHubIssue(issue)
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
@@ -62,7 +62,8 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED
 	}
 
-	nowTimestamp := time.Now().Unix()
+	now := time.Now()
+	nowTimestamp := now.Unix()
 
 	var updatedAtTimestamp int64 = 0
 	if issue.UpdatedAt != nil {
@@ -88,6 +89,31 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 	}
 	if issue.User != nil && issue.User.Name != nil {
 		authorName = *issue.User.Name
+	}
+
+	var lastMentionedAt *githubv4.DateTime
+	for _, comment := range extraInfo.Repository.PullRequest.Comments.Nodes {
+		for _, trigger := range gitHubMentionTriggers {
+			if strings.Contains(comment.Body, trigger) {
+				commentTime := comment.CreatedAt
+				if comment.UpdatedAt != nil {
+					commentTime = comment.UpdatedAt
+				}
+				if lastMentionedAt == nil || commentTime.After(lastMentionedAt.Time) {
+					lastMentionedAt = commentTime
+				}
+			}
+		}
+	}
+
+	if lastMentionedAt != nil {
+		if now.Sub(lastMentionedAt.Time) > 14*24*time.Hour &&
+			gitHubPullRequestStatus != proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_OPEN {
+			// PR is closed/merged and the last mention comment is too long ago. This means we may be importing/seeing
+			// this PR for the first time, but don't want it to show on top of the list in the "hey, look at me!"
+			// eye-catching status "mentioned".
+			lastMentionedAt = nil
+		}
 	}
 
 	codeReview := &proto.CodeReview{
@@ -137,6 +163,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		codeReview.Status = existingCodeReview.Status
 	}
 	codeReview.LastChangedTimestamp = max(existingCodeReview.LastChangedTimestamp, codeReview.LastChangedTimestamp)
+	codeReview.LastMentionTimestamp = max(existingCodeReview.LastMentionTimestamp, codeReview.LastMentionTimestamp)
 	codeReview.LastRefreshedTimestamp = max(existingCodeReview.LastRefreshedTimestamp, codeReview.LastRefreshedTimestamp)
 	codeReview.LastVisitedTimestamp = max(existingCodeReview.LastVisitedTimestamp, codeReview.LastVisitedTimestamp)
 
@@ -154,7 +181,20 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 
 	updateLastChangedToNow := false
 
-	if (existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED) &&
+	// A mention is considered important even after a code review is closed, for example if something was forgotten.
+	// Leaving the other person's comment unanswered would be rude, so we even bring back the code review to the
+	// list if it was already deleted. Or in short: the `Status` doesn't matter. Only if the repo is archived, we don't
+	// care about mentions (new comments shouldn't be possible in archived GitHub repos anyway).
+	if lastMentionedAt != nil && lastMentionedAt.Unix() > existingCodeReview.LastMentionTimestamp && !repoIsArchived {
+		logger.Infow("Marking code review as mentioned", "existingLastMentionTimestamp", existingCodeReview.LastMentionTimestamp, "lastMentionedAt", lastMentionedAt.Unix())
+		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_MENTIONED
+		codeReview.LastMentionTimestamp = lastMentionedAt.Unix()
+		codeReview.DeleteAfterTimestamp = 0
+		updateLastChangedToNow = true
+	}
+
+	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MERGED &&
+		existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MENTIONED &&
 		gitHubPullRequestStatus == proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED {
 		if existingCodeReview.Status == proto.CodeReviewStatus_CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE {
 			logger.Info("Marking code review as deleted because it was merged")
@@ -176,6 +216,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 	}
 
 	if existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_CLOSED &&
+		existingCodeReview.Status != proto.CodeReviewStatus_CODE_REVIEW_STATUS_MENTIONED &&
 		gitHubPullRequestStatus == proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_CLOSED {
 		codeReview.Status = proto.CodeReviewStatus_CODE_REVIEW_STATUS_CLOSED
 		updateLastChangedToNow = true
@@ -374,6 +415,14 @@ type ExtraInfoGraphQLQuery struct {
 				EnabledAt *githubv4.DateTime
 			}
 
+			Comments struct {
+				Nodes []struct {
+					CreatedAt *githubv4.DateTime
+					UpdatedAt *githubv4.DateTime
+					Body      string
+				}
+			} `graphql:"comments(last: 20)"`
+
 			Commits struct {
 				Nodes []struct {
 					Commit struct {
@@ -389,7 +438,7 @@ type ExtraInfoGraphQLQuery struct {
 	} `graphql:"repository(owner: $owner, name: $name)"`
 }
 
-func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUser string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUser string, gitHubMentionTriggers []string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
 	if err != nil {
 		return nil, err
@@ -423,11 +472,49 @@ func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, iss
 		logger.Warnw("Failed to delete obsolete avatar URL from database", "err", err)
 	}
 
-	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, getCodeReviewById, gitHubUser, extraInfo, logger)
+	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, getCodeReviewById, gitHubUser, gitHubMentionTriggers, extraInfo, logger)
 	if err != nil {
 		return nil, err
 	}
 	return codeReview, nil
+}
+
+func (s *WorkboardServer) getGitHubMentionTriggers() ([]string, error) {
+	logger := s.logger
+	logger.Debug("Reading GitHub mention triggers from database")
+
+	var gitHubMentionTriggers []string
+	ok, err := s.db.Get("github_mention_triggers", &gitHubMentionTriggers)
+	if err != nil {
+		logger.Errorw("Failed to read GitHub mention triggers from database", "err", err)
+		return nil, err
+	}
+	if !ok || len(gitHubMentionTriggers) == 0 {
+		gitHubMentionTriggersStr := os.Getenv("TEST_GITHUB_MENTION_TRIGGERS")
+		if gitHubMentionTriggersStr == "" {
+			return nil, errors.New("GitHub mention triggers not configured (at least one must be specified)")
+		}
+
+		gitHubMentionTriggers := strings.Split(gitHubMentionTriggersStr, ",")
+		for _, trigger := range gitHubMentionTriggers {
+			if !strings.HasPrefix(trigger, "@") {
+				return nil, fmt.Errorf("GitHub mention triggers must be comma-separated and each start with `@`: %q", trigger)
+			}
+
+			trimmedTrigger := strings.TrimSpace(trigger)
+			if trimmedTrigger == "" || trimmedTrigger != trigger {
+				return nil, fmt.Errorf("GitHub mention triggers may not contain spaces or be empty: %q", trigger)
+			}
+		}
+
+		err = s.db.Set("github_mention_triggers", gitHubMentionTriggers)
+		if err != nil {
+			logger.Errorw("Failed to write test GitHub mention triggers into database", "err", err)
+			return nil, err
+		}
+	}
+	logger.Debugw("Found GitHub mention triggers in database", "gitHubMentionTriggers", gitHubMentionTriggers)
+	return gitHubMentionTriggers, nil
 }
 
 func (s *WorkboardServer) getGitHubUser() (string, error) {
@@ -492,6 +579,13 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) error {
 		return err
 	}
 	logger = logger.With("gitHubUser", gitHubUser)
+
+	gitHubMentionTriggers, err := s.getGitHubMentionTriggers()
+	if err != nil {
+		return err
+	}
+	logger = logger.With("gitHubMentionTriggers", gitHubMentionTriggers)
+
 	logger.Info("Relisting code reviews")
 
 	client, _, err := s.ensureGitHubClient()
@@ -563,7 +657,7 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) error {
 			logger := logger.With("url", *issue.HTMLURL)
 			logger.Debug("Fetching details for not-yet-known GitHub PR")
 			var codeReview *proto.CodeReview
-			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, logger)
+			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, gitHubMentionTriggers, logger)
 			if err != nil {
 				return errors.Wrap(err, "failed to fetch GitHub PR details for relist")
 			}
@@ -638,6 +732,12 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 	}
 	logger = logger.With("gitHubUser", gitHubUser)
 
+	gitHubMentionTriggers, err := s.getGitHubMentionTriggers()
+	if err != nil {
+		return nil, err
+	}
+	logger = logger.With("gitHubMentionTriggers", gitHubMentionTriggers)
+
 	client, _, err := s.ensureGitHubClient()
 	if err != nil {
 		return nil, err
@@ -649,7 +749,7 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 		return nil, errors.Wrap(err, "failed to get GitHub PR")
 	}
 
-	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, logger)
+	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, gitHubMentionTriggers, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch GitHub PR details")
 	}

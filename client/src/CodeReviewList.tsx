@@ -48,6 +48,7 @@ const codeReviewStatusToStringMap: {
   [CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED]: 'archived',
   [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 'closed',
   [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 'deleted',
+  [CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED]: 'mentioned',
   [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 'merged',
   [CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW]: 'must-review',
   [CodeReviewStatus.CODE_REVIEW_STATUS_NEW]: 'new',
@@ -100,6 +101,7 @@ const statusSortOrder: {
   [CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED]: 1,
   [CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED]: 1,
   [CodeReviewStatus.CODE_REVIEW_STATUS_DELETED]: 999, // not applicable since we filter those out for rendering
+  [CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED]: 1,
   [CodeReviewStatus.CODE_REVIEW_STATUS_MERGED]: 1,
   [CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW]: 2,
   [CodeReviewStatus.CODE_REVIEW_STATUS_NEW]: 4,
@@ -115,6 +117,7 @@ enum CodeReviewGroupType {
   // Strings in lexicographical order of display top-to-bottom.
   // The order prefix can be freely changed without having to touch other
   // places in code. The rest is used for CSS classes such as `tr.code-review-group-type-snoozed`.
+  Mentioned = '050-mentioned',
   MergedOrUpdated = '100-merged-or-updated',
   MustReviewOrCameBackFromSnooze = '200-must-review',
   Rest = '700-rest',
@@ -132,6 +135,7 @@ const codeReviewGroupTypes: Array<CodeReviewGroupType> = Object.keys(
 const codeReviewGroupTypeHeaderDescription: {
   [groupType in CodeReviewGroupType]: string;
 } = {
+  [CodeReviewGroupType.Mentioned]: 'You were mentioned',
   [CodeReviewGroupType.MergedOrUpdated]: 'Merged or updated',
   [CodeReviewGroupType.MustReviewOrCameBackFromSnooze]: 'Must review',
   [CodeReviewGroupType.Rest]: 'Other',
@@ -174,7 +178,9 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
       continue;
     }
 
-    if (
+    if (codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED) {
+      groupType = CodeReviewGroupType.Mentioned;
+    } else if (
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
       codeReview.status ==
         CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE ||
@@ -1208,6 +1214,19 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           className={`status status-${codeReviewStatusToString(codeReview.status)}`}
                         >
                           {codeReview.status ==
+                            CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED && (
+                            <>
+                              Mentioned{' '}
+                              {timeago.format(
+                                new Date(
+                                  codeReview.lastMentionTimestamp * 1000,
+                                ),
+                                'en',
+                              )}
+                            </>
+                          )}
+
+                          {codeReview.status ==
                             CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME && (
                             <>
                               Snoozed until:{' '}
@@ -1236,7 +1255,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                           )}
 
                           {codeReview.status !=
-                            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
+                            CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED &&
+                            codeReview.status !=
+                              CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
                             codeReview.status !=
                               CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE &&
                             codeReviewStatusToString(codeReview.status)}

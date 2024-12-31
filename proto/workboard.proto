@@ -30,10 +30,15 @@ message CodeReview {
 
   CodeReviewRenderOnlyFields render_only_fields = 4;
 
-  // Last change to workboard status by the user. Can be zero if newly imported.
+  // Last change to workboard status by the user or application. Can be zero
+  // if newly imported.
   int64 last_changed_timestamp = 5;
 
   int64 last_refreshed_timestamp = 11;
+
+  // Last mention of user/team (configured in mention triggers) on the platform
+  // (e.g. GitHub). Can be zero if not known or no mentions happened.
+  int64 last_mention_timestamp = 13;
 
   // Last update of the code review on the platform (e.g. GitHub). Can be zero
   // if not known.
@@ -69,6 +74,7 @@ enum CodeReviewStatus {
   CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME = 3;
   CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE = 4;
   CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE = 9;
+  CODE_REVIEW_STATUS_MENTIONED = 13;
 }
 
 enum GitHubPullRequestStatus {

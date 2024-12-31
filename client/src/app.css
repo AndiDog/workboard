@@ -112,6 +112,18 @@ tr.code-review-group {
   font-weight: bold;
 }
 
+tr.code-review-group-type-mentioned {
+  background: repeating-linear-gradient(
+    315deg,
+    #e593e7 0,
+    #e593e7 1em,
+    #e4b2e5 1em,
+    #e4b2e5 1.2em,
+    #e593e7 1.2em
+  );
+  color: black;
+}
+
 tr.code-review-group-type-merged-or-updated {
   background: repeating-linear-gradient(
     315deg,
@@ -193,6 +205,10 @@ td.status-archived {
 
 td.status-closed {
   background-color: #d53d26dd;
+}
+
+td.status-mentioned {
+  background-color: #e16ae3dd;
 }
 
 td.status-merged {

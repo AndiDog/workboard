@@ -9,6 +9,7 @@ Technically, this is a very simple web application plus backend server. The serv
 ```sh
 # One-time setup
 cat > server/.env-local <<EOF
+TEST_GITHUB_MENTION_TRIGGERS=@FillInYourGitHubUserName,@myorg/example-for-a-team
 TEST_GITHUB_USER=FillInYourGitHubUserName
 WORKBOARD_GITHUB_TOKEN=ghp_FILL_IN_YOUR_GITHUB_API_TOKEN
 EOF
