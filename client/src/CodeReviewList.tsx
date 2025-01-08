@@ -1201,7 +1201,21 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                     codeReviewGroup.sortedCodeReviews.map((codeReview) => (
                       <tr
                         key={codeReview.id}
-                        className={`status-${codeReviewStatusToString(codeReview.status)}${nowTimestamp - codeReview.lastChangedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastChangedTimestamp <= 900 ? ' very-recently-changed' : ' recently-changed') : nowTimestamp - codeReview.lastVisitedTimestamp <= 3600 ? (nowTimestamp - codeReview.lastVisitedTimestamp <= 900 ? ' very-recently-visited' : ' recently-visited') : ''}`}
+                        className={`status-${codeReviewStatusToString(codeReview.status)}${
+                          nowTimestamp - codeReview.lastVisitedTimestamp <= 3600
+                            ? nowTimestamp - codeReview.lastVisitedTimestamp <=
+                              900
+                              ? ' very-recently-visited'
+                              : ' recently-visited'
+                            : nowTimestamp - codeReview.lastChangedTimestamp <=
+                                3600
+                              ? nowTimestamp -
+                                  codeReview.lastChangedTimestamp <=
+                                900
+                                ? ' very-recently-changed'
+                                : ' recently-changed'
+                              : ''
+                        }`}
                       >
                         <td>
                           <span className="repo-name">
