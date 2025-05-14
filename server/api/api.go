@@ -67,13 +67,10 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 
 	var updatedAtTimestamp int64 = 0
 	if issue.UpdatedAt != nil {
-		updatedAtTimestamp = issue.UpdatedAt.Time.Unix()
+		updatedAtTimestamp = issue.UpdatedAt.Unix()
 	}
 
-	repoIsArchived := false
-	if extraInfo.Repository.ArchivedAt != nil && !extraInfo.Repository.ArchivedAt.IsZero() {
-		repoIsArchived = true
-	}
+	repoIsArchived := extraInfo.Repository.ArchivedAt != nil && !extraInfo.Repository.ArchivedAt.IsZero()
 
 	statusCheckRollupQueryState := ""
 	if len(extraInfo.Repository.PullRequest.Commits.Nodes) > 0 {
@@ -154,7 +151,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		return nil, err
 	}
 	if existingCodeReview == nil {
-		codeReview.LastChangedTimestamp = issue.UpdatedAt.Time.Unix()
+		codeReview.LastChangedTimestamp = issue.UpdatedAt.Unix()
 
 		return codeReview, nil
 	}
