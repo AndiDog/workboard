@@ -1367,6 +1367,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                     <option value="">Snooze for…</option>
                                     <option value="3600">1 hour</option>
                                     <option value="86400">1 day</option>
+                                    <option value="259200">3 days</option>
                                     <option value="604800">7 days</option>
                                     <option value="1209600">14 days</option>
                                   </select>
