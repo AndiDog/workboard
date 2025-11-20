@@ -34,6 +34,8 @@ type CodeReviewListState = {
 
   codeReviewIdsWithActiveCommands: Set<string>;
 
+  relistCommandGrpcResult?: GrpcResult<CommandResponse>;
+
   searchEnabled: boolean;
   searchText: string;
 
@@ -987,6 +989,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     client.RelistReviews(new RelistReviewsCommand(), null, (error, res) => {
       const commandResult = toGrpcResult(error, res);
+      this.setState({
+        relistCommandGrpcResult: commandResult,
+      });
       if (!commandResult.ok) {
         console.error(`Command failed (RelistReviews): ${commandResult.error}`);
         return;
@@ -1000,7 +1005,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     const codeReviewDesc =
       (codeReview.githubFields?.url ?? '') +
       ' ' +
-      (codeReview.githubFields?.title ?? '');
+      (codeReview.githubFields?.title ?? '') +
+      ' ' +
+      (codeReview.renderOnlyFields.authorName ?? '');
 
     const searchWords = this.state.searchText
       .toLowerCase()
@@ -1084,6 +1091,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     return (
       <>
+        {this.state.relistCommandGrpcResult?.error && (
+          <ErrorBanner
+            error={`Failed to refresh list of code reviews: ${this.state.relistCommandGrpcResult.error.message}`}
+          />
+        )}
+
         <table className="pull-requests">
           <thead>
             <tr>
