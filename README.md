@@ -27,6 +27,8 @@ docker-compose up --build -w # for development
 
 ## Usage
 
+You need a GitHub personal access token (classic). Create it [here](https://github.com/settings/tokens/new), add permissions `repo`, and paste the token into `server/.env-local` as shown above.
+
 Use a full-sized monitor. This application is not meant for mobile devices because reviewing PRs on mobile is a rare corner case and not worth supporting.
 
 The application runs locally. Use the "Running" instructions above. That's it – the application should be self-explanatory. Look at the terminal output in case of problems.
