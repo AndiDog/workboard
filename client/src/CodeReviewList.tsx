@@ -19,6 +19,8 @@ import {
   MarkVisitedCommand,
   RelistReviewsCommand,
   RefreshReviewsCommand,
+  Config,
+  GetConfigQuery,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -29,6 +31,8 @@ import ErrorBanner from './ErrorBanner';
 const safeColor = new SafeColor({ color: [255, 255, 255], contrast: 3 });
 
 type CodeReviewListState = {
+  cfg: GrpcResult<Config>;
+
   codeReviewGroups?: CodeReviewGroup[];
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
 
@@ -151,6 +155,55 @@ type CodeReviewGroup = {
   sortedCodeReviews: CodeReview[];
 };
 
+function getCodeReviewWeight(
+  codeReview: CodeReview,
+  cfg: GrpcResult<Config>,
+): number {
+  if (!cfg.ok) {
+    return 0;
+  }
+
+  let weight = 0;
+  for (const weightRule of cfg.res.weightRules) {
+    let conditionHolds = false;
+    let conditionWasTested = 0;
+
+    if (weightRule.condition.authorContainsRegex !== '') {
+      conditionHolds = new RegExp(
+        weightRule.condition.authorContainsRegex,
+      ).test(codeReview.renderOnlyFields.authorName);
+      ++conditionWasTested;
+    }
+    if (weightRule.condition.repoNameContainsRegex !== '') {
+      conditionHolds = new RegExp(
+        weightRule.condition.repoNameContainsRegex,
+      ).test(codeReview.githubFields.repo.name);
+      ++conditionWasTested;
+    }
+    if (weightRule.condition.repoOrgContainsRegex !== '') {
+      conditionHolds = new RegExp(
+        weightRule.condition.repoOrgContainsRegex,
+      ).test(codeReview.githubFields.repo.organizationName);
+      ++conditionWasTested;
+    }
+
+    if (!conditionWasTested) {
+      throw new Error('Unimplemented weight rule condition');
+    }
+    if (conditionWasTested > 1) {
+      throw new Error(
+        'Configuration is invalid: must only use one weight rule condition (no `AND` support)',
+      );
+    }
+
+    if (conditionHolds) {
+      weight += weightRule.weightChange;
+    }
+  }
+
+  return weight;
+}
+
 function hashCode(str: string): number {
   let hash = 0;
   for (let i = 0, len = str.length; i < len; i++) {
@@ -168,7 +221,10 @@ function simplePlural(count: number, singular: string) {
   return singular + 's';
 }
 
-function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
+function sortCodeReviews(
+  res: GetCodeReviewsResponse,
+  cfg: GrpcResult<Config>,
+): CodeReviewGroup[] {
   const groupTypeStrToReviews: {
     [groupTypeStr: string]: CodeReview[];
   } = {};
@@ -221,7 +277,12 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
   // Sort code reviews within each group
   for (const codeReviews of Object.values(groupTypeStrToReviews)) {
     codeReviews.sort((a, b) => {
+      const weightA = getCodeReviewWeight(a, cfg);
+      const weightB = getCodeReviewWeight(b, cfg);
+
       return (
+        // Highest weight comes first
+        weightB - weightA ||
         // Reviews with latest changes are displayed on top, ordered by status
         (statusSortOrder[a.status] || 999) -
           (statusSortOrder[b.status] || 999) ||
@@ -266,6 +327,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.localLastRefreshedTimestampMap = new Map();
     this.numRunningAutoRefreshRequests = 0;
     this.state = {
+      cfg: makePendingGrpcResult(),
       codeReviewGroups: undefined,
       codeReviewIdsWithActiveCommands: new Set(),
       hiddenCodeReviewGroups: new Set([
@@ -279,6 +341,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
   componentDidMount() {
     this.refresh();
+
+    let client = new WorkboardClient(grpcWebServerUrl);
+
+    client.GetConfig(new GetConfigQuery(), null, (error, res) => {
+      this.setState({
+        cfg: toGrpcResult(error, res),
+      });
+    });
 
     this.refreshIntervalCancel = setInterval(
       this.onIntervalBasedRefresh.bind(this),
@@ -943,7 +1013,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       let codeReviewGroups: CodeReviewGroup[] | undefined =
         thiz.state.codeReviewGroups;
       if (res !== null) {
-        codeReviewGroups = sortCodeReviews(res);
+        codeReviewGroups = sortCodeReviews(res, this.state.cfg);
       }
 
       thiz.setState({
@@ -963,7 +1033,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         let codeReviewGroups: CodeReviewGroup[] | undefined =
           thiz.state.codeReviewGroups;
         if (res !== null) {
-          codeReviewGroups = sortCodeReviews(res);
+          codeReviewGroups = sortCodeReviews(res, this.state.cfg);
         }
 
         const newCodeReviewIdsWithActiveCommands = new Set(
@@ -1033,6 +1103,18 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   render() {
+    if (this.state.cfg.pending) {
+      return <Spinner />;
+    }
+
+    if (!this.state.cfg.ok) {
+      return (
+        <ErrorBanner
+          error={`Failed to get config: ${this.state.cfg.error.message}`}
+        />
+      );
+    }
+
     const nowTimestamp = Date.now() / 1000;
 
     // The ones to be rendered (can be filtered by search, deleted status, etc.).

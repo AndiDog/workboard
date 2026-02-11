@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"andidog.de/workboard/server/api"
+	"andidog.de/workboard/server/config"
 	"andidog.de/workboard/server/database"
 	"andidog.de/workboard/server/proto"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
@@ -70,6 +71,12 @@ func main() {
 	}
 	logger.Infow("Opened database", "databaseDir", databaseDir)
 
+	cfg, err := config.ReadConfig()
+	if err != nil {
+		logger.Fatal("Invalid config: %s", err)
+	}
+	logger.Infow("Config", "weight_rules_len", len(cfg.WeightRules))
+
 	// gRPC setup (TODO: only keep gRPC-Web)
 	grpcListenAddress := os.Getenv("GRPC_LISTEN_STRING")
 	if grpcListenAddress == "" {
@@ -81,7 +88,7 @@ func main() {
 	}
 	var opts []grpc.ServerOption
 	grpcServer := grpc.NewServer(opts...)
-	workboardServer, err := api.NewWorkboardServer(db, logger)
+	workboardServer, err := api.NewWorkboardServer(cfg, db, logger)
 	if err != nil {
 		logger.Fatalw("Failed to start", "err", err)
 	}

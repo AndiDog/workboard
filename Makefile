@@ -30,6 +30,6 @@ server-lint:
 .PHONY: server-watch
 server-watch: generate-server server-lint
 	cd server && ( \
-		find . -name go.mod -o -name go.sum -o -name "*.go" \
+		find . -name go.mod -o -name go.sum -o -name "*.go" -o -name ".env*" \
 			| entr -ccr sh -c 'go run main.go' \
 	)

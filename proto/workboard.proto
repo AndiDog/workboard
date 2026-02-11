@@ -77,6 +77,10 @@ enum CodeReviewStatus {
   CODE_REVIEW_STATUS_MENTIONED = 13;
 }
 
+message Config {
+  repeated WeightRule weight_rules = 1;
+}
+
 enum GitHubPullRequestStatus {
   GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED = 0;
 
@@ -106,9 +110,25 @@ message GitHubRepo {
   string name = 2;
 }
 
+message WeightRule {
+  WeightRuleCondition condition = 1;
+
+  // PRs with higher weight are shown first to the user (= higher priority, but the term "priority"
+  // isn't well-understood regarding what's positive vs. negative numbers)
+  int32 weight_change = 2;
+}
+
+message WeightRuleCondition {
+  string author_contains_regex = 1;
+  string repo_name_contains_regex = 2;
+  string repo_org_contains_regex = 3;
+}
+
 // QUERIES
 
 message GetCodeReviewsQuery {}
+
+message GetConfigQuery {}
 
 message GetCodeReviewsResponse {
   repeated CodeReview code_reviews = 1;
@@ -162,6 +182,8 @@ service Workboard {
   rpc DeleteReview(DeleteReviewCommand) returns (CommandResponse) {}
 
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
+
+  rpc GetConfig(GetConfigQuery) returns (Config) {}
 
   rpc MarkMustReview(MarkMustReviewCommand) returns (CommandResponse) {}
 

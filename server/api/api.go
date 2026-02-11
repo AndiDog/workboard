@@ -24,6 +24,7 @@ const deleteAfterNowSeconds = 86400 * 30
 type WorkboardServer struct {
 	proto.UnimplementedWorkboardServer
 
+	cfg     *proto.Config
 	db      *database.Database
 	dbMutex sync.Mutex
 	logger  *zap.SugaredLogger
@@ -32,11 +33,12 @@ type WorkboardServer struct {
 	gitHubGraphQLClient *githubv4.Client
 }
 
-func NewWorkboardServer(db *database.Database, logger *zap.SugaredLogger) (*WorkboardServer, error) {
+func NewWorkboardServer(cfg *proto.Config, db *database.Database, logger *zap.SugaredLogger) (*WorkboardServer, error) {
 	if db == nil {
 		return nil, errors.New("db must not be nil")
 	}
 	return &WorkboardServer{
+		cfg:    cfg,
 		db:     db,
 		logger: logger,
 	}, nil
@@ -709,6 +711,13 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, query *proto.GetCo
 		res.CodeReviews = append(res.CodeReviews, codeReview)
 	}
 	return res, nil
+}
+
+func (s *WorkboardServer) GetConfig(ctx context.Context, query *proto.GetConfigQuery) (*proto.Config, error) {
+	logger := s.logger
+	logger.Info("GetConfig")
+
+	return s.cfg, nil
 }
 
 func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId string) (*proto.CodeReview, error) {

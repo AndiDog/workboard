@@ -12,6 +12,7 @@ cat > server/.env-local <<EOF
 TEST_GITHUB_MENTION_TRIGGERS=@FillInYourGitHubUserName,@myorg/example-for-a-team
 TEST_GITHUB_USER=FillInYourGitHubUserName
 WORKBOARD_GITHUB_TOKEN=ghp_FILL_IN_YOUR_GITHUB_API_TOKEN
+WORKBOARD_CONFIG={"weight_rules": [{"condition": {"repo_org_contains_regex": "my-company"}, "weight_change": 10}]}
 EOF
 
 # Start these in separate terminals (only development mode; no one-liner available right now)
