@@ -21,6 +21,7 @@ import {
   RefreshReviewsCommand,
   Config,
   GetConfigQuery,
+  SetCodeReviewManualWeightCommand,
 } from './generated/workboard';
 import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
 import Spinner from './Spinner';
@@ -161,6 +162,11 @@ function getCodeReviewWeight(
 ): number {
   if (!cfg.ok) {
     return 0;
+  }
+
+  // Use manual override if set
+  if (codeReview.hasManualWeightOverride) {
+    return codeReview.manualWeightOverride;
   }
 
   let weight = 0;
@@ -864,6 +870,45 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  private onSetManualWeight(codeReview: CodeReview, event: Event) {
+    event.preventDefault();
+    const currentWeight = getCodeReviewWeight(codeReview, this.state.cfg);
+    const input = window.prompt(
+      'Enter manual weight override (leave empty to clear):',
+      currentWeight.toString(),
+    );
+    if (input === null) {
+      return;
+    }
+    const trimmed = input.trim();
+    let weightValue: number | undefined;
+    if (trimmed === '') {
+      weightValue = undefined;
+    } else {
+      const parsed = parseInt(trimmed, 10);
+      if (isNaN(parsed)) {
+        alert('Invalid weight. Please enter a number.');
+        return;
+      }
+      weightValue = parsed;
+    }
+
+    this.runCommandOnSingleCodeReview(
+      codeReview.id,
+      'set manual weight',
+      (client, onResult) => {
+        client.SetCodeReviewManualWeight(
+          new SetCodeReviewManualWeightCommand({
+            codeReviewId: codeReview.id,
+            manualWeightOverride: weightValue,
+          }),
+          null,
+          onResult,
+        );
+      },
+    );
+  }
+
   onRelist(event: Event) {
     event.preventDefault();
 
@@ -1556,6 +1601,18 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               </button>
                             )}
 
+                            <button
+                              onClick={this.onSetManualWeight.bind(
+                                this,
+                                codeReview,
+                              )}
+                              disabled={this.state.codeReviewIdsWithActiveCommands.has(
+                                codeReview.id,
+                              )}
+                            >
+                              Set weight (
+                              {getCodeReviewWeight(codeReview, this.state.cfg)})
+                            </button>
                             <button
                               onClick={(event) =>
                                 this.onRefresh(event, codeReview.id)

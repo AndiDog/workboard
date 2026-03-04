@@ -169,6 +169,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 	codeReview.SnoozeUntilUpdatedAtChangedFrom = existingCodeReview.SnoozeUntilUpdatedAtChangedFrom
 	codeReview.BringBackToReviewIfNotMergedUntilTimestamp = existingCodeReview.BringBackToReviewIfNotMergedUntilTimestamp
 	codeReview.SnoozeUntilTimestamp = existingCodeReview.SnoozeUntilTimestamp
+	codeReview.ManualWeightOverride = existingCodeReview.ManualWeightOverride
 
 	//
 	// State machine, the smart part of the application :)
@@ -1003,6 +1004,38 @@ func (s *WorkboardServer) SnoozeUntilTime(ctx context.Context, cmd *proto.Snooze
 	err = s.storeCodeReview(codeReview)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to store snoozed code review")
+	}
+
+	return &proto.CommandResponse{}, nil
+}
+
+func (s *WorkboardServer) SetCodeReviewManualWeight(ctx context.Context, cmd *proto.SetCodeReviewManualWeightCommand) (*proto.CommandResponse, error) {
+	logger := s.logger.With("codeReviewId", cmd.CodeReviewId, "manualWeightOverride", cmd.ManualWeightOverride)
+	logger.Info("SetCodeReviewManualWeight")
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
+
+	codeReview, err := s.getCodeReviewById(cmd.CodeReviewId)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get code review in order to set manual weight")
+	}
+	if codeReview == nil {
+		return nil, errors.New("no such code review")
+	}
+
+	if codeReview.GithubFields != nil {
+		logger = sugarLoggerWithGitHubPullRequestFields(logger, codeReview.GithubFields)
+	}
+
+	codeReview.ManualWeightOverride = cmd.ManualWeightOverride
+	codeReview.LastChangedTimestamp = time.Now().Unix()
+
+	logger.Infow("Set manual weight override for code review", "weight", cmd.ManualWeightOverride)
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to store code review with manual weight")
 	}
 
 	return &proto.CommandResponse{}, nil

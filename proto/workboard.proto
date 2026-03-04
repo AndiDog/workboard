@@ -30,6 +30,11 @@ message CodeReview {
 
   CodeReviewRenderOnlyFields render_only_fields = 4;
 
+  // Manual weight override set by the user. If set, this weight is used instead
+  // of calculated weight rules. If unset (default), weight rules are used to
+  // calculate the weight.
+  optional int32 manual_weight_override = 14;
+
   // Last change to workboard status by the user or application. Can be zero
   // if newly imported.
   int64 last_changed_timestamp = 5;
@@ -113,8 +118,9 @@ message GitHubRepo {
 message WeightRule {
   WeightRuleCondition condition = 1;
 
-  // PRs with higher weight are shown first to the user (= higher priority, but the term "priority"
-  // isn't well-understood regarding what's positive vs. negative numbers)
+  // PRs with higher weight are shown first to the user (= higher priority, but
+  // the term "priority" isn't well-understood regarding what's positive vs.
+  // negative numbers)
   int32 weight_change = 2;
 }
 
@@ -164,6 +170,13 @@ message ReviewedDeleteOnMergeCommand {
   string code_review_id = 1;
 }
 
+message SetCodeReviewManualWeightCommand {
+  string code_review_id = 1;
+
+  // If unset, any override on the code review will be unset
+  optional int32 manual_weight_override = 2;
+}
+
 message SnoozeUntilMentionedCommand {
   string code_review_id = 1;
 }
@@ -201,6 +214,12 @@ service Workboard {
   rpc RefreshReviews(RefreshReviewsCommand) returns (CommandResponse) {}
 
   rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
+      returns (CommandResponse) {}
+
+  // Set manual weight override for a code review. If set, this weight is used
+  // instead of calculated weight rules. If unset (default), configured weight
+  // rules are used to calculate the weight.
+  rpc SetCodeReviewManualWeight(SetCodeReviewManualWeightCommand)
       returns (CommandResponse) {}
 
   rpc SnoozeUntilMentioned(SnoozeUntilMentionedCommand)
