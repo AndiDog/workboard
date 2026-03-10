@@ -186,6 +186,12 @@ function getCodeReviewWeight(
       ).test(codeReview.githubFields.repo.name);
       ++conditionWasTested;
     }
+    if (weightRule.condition.githubPrPipelineStatusRegex !== '') {
+      conditionHolds = new RegExp(
+        weightRule.condition.githubPrPipelineStatusRegex,
+      ).test(codeReview.githubFields.statusCheckRollupStatus);
+      ++conditionWasTested;
+    }
     if (weightRule.condition.repoOrgContainsRegex !== '') {
       conditionHolds = new RegExp(
         weightRule.condition.repoOrgContainsRegex,

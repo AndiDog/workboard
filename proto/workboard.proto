@@ -126,6 +126,7 @@ message WeightRule {
 
 message WeightRuleCondition {
   string author_contains_regex = 1;
+  string github_pr_pipeline_status_regex = 4;
   string repo_name_contains_regex = 2;
   string repo_org_contains_regex = 3;
 }
