@@ -342,3 +342,11 @@ td.status-updated-after-snooze {
   vertical-align: middle;
   margin-right: 0.3em;
 }
+
+.code-review-pipeline-status.approved-by-self {
+  color: #22c55e;
+}
+
+.bi.code-review-pipeline-status {
+  font-size: 1.5em;
+}

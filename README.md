@@ -102,5 +102,6 @@ The following libraries and resources are used, thank you to the authors!
 - IconDuck icons ([CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/deed.en))
 
   - [Dazzle UI Icon Library](https://iconduck.com/sets/dazzle-ui-icon-library)
+- [Bootstrap Icons](https://icons.getbootstrap.com/) ([MIT license](https://github.com/twbs/icons/blob/main/LICENSE))
 
 - [SafeColor](https://github.com/jessuni/SafeColor) ([MIT license](./client/src/vendor/safecolor/LICENSE))

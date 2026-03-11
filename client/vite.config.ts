@@ -17,9 +17,9 @@ export default defineConfig({
       'X-Frame-Options': 'DENY',
       'X-XSS-Protection': '1; mode=block',
       'Content-Security-Policy':
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net" +
         "; img-src 'self' https://avatars.githubusercontent.com/" +
-        '; font-src https://fonts.gstatic.com',
+        '; font-src https://fonts.gstatic.com https://cdn.jsdelivr.net',
     },
     port: 5174, // another of my projects already uses 5173 for local development
   },

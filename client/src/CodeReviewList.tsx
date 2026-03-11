@@ -1479,6 +1479,19 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                               title="PR has auto-merge enabled"
                             />
                           )}
+                          {codeReview.renderOnlyFields.approvedBySelf && (
+                            <i
+                              className="bi bi-hand-thumbs-up code-review-pipeline-status approved-by-self"
+                              title="Approved by you"
+                            />
+                          )}
+                          {!codeReview.renderOnlyFields.approvedBySelf &&
+                            codeReview.renderOnlyFields.approvedByOthers && (
+                              <i
+                                className="bi bi-hand-thumbs-up code-review-pipeline-status"
+                                title="Approved by others"
+                              />
+                            )}
 
                           <a
                             href={codeReview.githubFields?.url || ''}

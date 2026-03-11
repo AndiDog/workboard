@@ -115,6 +115,18 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		}
 	}
 
+	approvedBySelf := false
+	approvedByOthers := false
+	for _, review := range extraInfo.Repository.PullRequest.Reviews.Nodes {
+		if review.State == "APPROVED" {
+			if review.Author.Login == gitHubUserSelf {
+				approvedBySelf = true
+			} else {
+				approvedByOthers = true
+			}
+		}
+	}
+
 	codeReview := &proto.CodeReview{
 		Id:     id,
 		Status: proto.CodeReviewStatus_CODE_REVIEW_STATUS_NEW,
@@ -135,9 +147,11 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 
 		// TODO Rather only fill these at render time, which was the purpose of the field
 		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
-			AuthorIsSelf: issue.User != nil && issue.User.Login != nil && *issue.User.Login == gitHubUserSelf,
-			AuthorName:   authorName,
-			AvatarUrl:    conditionalUserAvatarUrl(&extraInfo, logger),
+			AuthorIsSelf:     issue.User != nil && issue.User.Login != nil && *issue.User.Login == gitHubUserSelf,
+			ApprovedBySelf:   approvedBySelf,
+			ApprovedByOthers: approvedByOthers,
+			AuthorName:       authorName,
+			AvatarUrl:        conditionalUserAvatarUrl(&extraInfo, logger),
 		},
 
 		LastChangedTimestamp:                       0,
@@ -434,6 +448,15 @@ type ExtraInfoGraphQLQuery struct {
 			} `graphql:"commits(last: 1)"`
 
 			IsDraft bool
+
+			Reviews struct {
+				Nodes []struct {
+					Author struct {
+						Login string
+					}
+					State string
+				}
+			} `graphql:"reviews(first: 100)"`
 		} `graphql:"pullRequest(number: $number)"`
 	} `graphql:"repository(owner: $owner, name: $name)"`
 }

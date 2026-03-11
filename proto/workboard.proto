@@ -11,6 +11,12 @@ message CodeReviewRenderOnlyFields {
   // reviews are listed.
   bool author_is_self = 1;
 
+  // Whether the PR was approved by the current user (gitHubUserSelf)
+  bool approved_by_self = 4;
+
+  // Whether the PR was approved by anyone other than the current user
+  bool approved_by_others = 5;
+
   // Some display name of the code review author
   string author_name = 3;
 
