@@ -8,6 +8,7 @@ This project gets the list and details of GitHub PRs (pull requests) and display
 - State is read and written using `Get`, `Set` and `Delete` methods of `Database`. All PRs are stored in the key `code_reviews`.
 - Changes to `client/` code must be checked with `make client-lint`.
 - Changes to `server/` code must be checked with `make server-lint`.
+- All `make` commands must be run in the top directory.
 
 ## protobuf rules
 
