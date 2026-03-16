@@ -198,6 +198,14 @@ function getCodeReviewWeight(
       ).test(codeReview.githubFields.repo.organizationName);
       ++conditionWasTested;
     }
+    if (weightRule.condition.hasApprovedBySelf) {
+      conditionHolds = weightRule.condition.approvedBySelf === codeReview.renderOnlyFields.approvedBySelf;
+      ++conditionWasTested;
+    }
+    if (weightRule.condition.hasApprovedByOthers) {
+      conditionHolds = weightRule.condition.approvedByOthers === codeReview.renderOnlyFields.approvedByOthers;
+      ++conditionWasTested;
+    }
 
     if (!conditionWasTested) {
       throw new Error('Unimplemented weight rule condition');

@@ -131,6 +131,8 @@ message WeightRule {
 }
 
 message WeightRuleCondition {
+  optional bool approved_by_others = 6;
+  optional bool approved_by_self = 5;
   string author_contains_regex = 1;
   string github_pr_pipeline_status_regex = 4;
   string repo_name_contains_regex = 2;
