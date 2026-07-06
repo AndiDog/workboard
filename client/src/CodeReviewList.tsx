@@ -375,8 +375,23 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     let client = new WorkboardClient(grpcWebServerUrl);
 
     client.GetConfig(new GetConfigQuery(), null, (error, res) => {
-      this.setState({
-        cfg: toGrpcResult(error, res),
+      const cfg = toGrpcResult(error, res);
+
+      // Code reviews may have been sorted while the config was still pending
+      // (all weights zero). Re-sort them now that the real config is known.
+      this.setState((prevState): Partial<CodeReviewListState> => {
+        let codeReviewGroups = prevState.codeReviewGroups;
+        if (cfg.ok && prevState.codeReviewsGrpcResult?.ok) {
+          codeReviewGroups = sortCodeReviews(
+            prevState.codeReviewsGrpcResult.res,
+            cfg,
+          );
+        }
+
+        return {
+          cfg,
+          codeReviewGroups,
+        };
       });
     });
 
@@ -403,6 +418,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     let afterHash = 0;
 
     if (
+      // `cfg` is always replaced wholesale (never mutated in place), so a
+      // reference comparison detects config loading and any later change.
+      this.state.cfg !== nextState.cfg ||
       this.state.codeReviewIdsWithActiveCommands.size !=
         nextState.codeReviewIdsWithActiveCommands.size ||
       this.state.codeReviewGroups?.length !=
