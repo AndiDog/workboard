@@ -338,6 +338,11 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   numRunningAutoRefreshRequests: number;
   refreshIntervalCancel?: NodeJS.Timeout;
 
+  // Monotonic counter identifying the latest GetCodeReviews request. Responses
+  // whose captured value is stale are ignored so a slow older response can't
+  // overwrite a newer one.
+  getCodeReviewsSeq: number;
+
   constructor(props: {}) {
     super(props);
 
@@ -346,6 +351,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.lastAutoRefreshErrorTimestamp = 0;
     this.localLastRefreshedTimestampMap = new Map();
     this.numRunningAutoRefreshRequests = 0;
+    this.getCodeReviewsSeq = 0;
     this.state = {
       cfg: makePendingGrpcResult(),
       codeReviewGroups: undefined,
@@ -1063,7 +1069,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     let client = new WorkboardClient(grpcWebServerUrl);
 
     const thiz = this;
+    const seq = ++this.getCodeReviewsSeq;
     client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
+      if (seq !== this.getCodeReviewsSeq) {
+        // A newer GetCodeReviews request has started; ignore this stale response
+        return;
+      }
+
       const newCodeReviewIdsWithActiveCommands = new Set(
         this.state.codeReviewIdsWithActiveCommands,
       );
@@ -1088,7 +1100,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
       let client = new WorkboardClient(grpcWebServerUrl);
 
+      const seq = ++this.getCodeReviewsSeq;
       client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
+        if (seq !== this.getCodeReviewsSeq) {
+          // A newer GetCodeReviews request has started; ignore this stale response
+          return;
+        }
+
         let codeReviewGroups: CodeReviewGroup[] | undefined =
           thiz.state.codeReviewGroups;
         if (res !== null) {
