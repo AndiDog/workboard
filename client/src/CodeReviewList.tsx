@@ -378,6 +378,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   // overwrite a newer one.
   getCodeReviewsSeq: number;
 
+  // Whether the component is mounted, used to skip setState from async gRPC
+  // callbacks that resolve after unmount
+  mounted: boolean;
+
   constructor(props: {}) {
     super(props);
 
@@ -387,6 +391,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.localLastRefreshedTimestampMap = new Map();
     this.numRunningAutoRefreshRequests = 0;
     this.getCodeReviewsSeq = 0;
+    this.mounted = false;
     this.state = {
       cfg: makePendingGrpcResult(),
       codeReviewGroups: undefined,
@@ -401,11 +406,17 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   componentDidMount() {
+    this.mounted = true;
+
     this.refresh();
 
     let client = new WorkboardClient(grpcWebServerUrl);
 
     client.GetConfig(new GetConfigQuery(), null, (error, res) => {
+      if (!this.mounted) {
+        return;
+      }
+
       const cfg = toGrpcResult(error, res);
 
       // Code reviews may have been sorted while the config was still pending
@@ -433,6 +444,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   componentWillUnmount() {
+    this.mounted = false;
+
     if (this.refreshIntervalCancel !== undefined) {
       clearInterval(this.refreshIntervalCancel);
       this.refreshIntervalCancel = undefined;
@@ -802,6 +815,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
         for (const codeReviewId of codeReviewIds) {
           runCommand(codeReviewId, client, (error, res) => {
+            if (!this.mounted) {
+              return;
+            }
+
             const commandResult = toGrpcResult(error, res);
             if (!commandResult.ok) {
               console.error(
@@ -846,6 +863,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         let client = new WorkboardClient(grpcWebServerUrl);
 
         runCommand(codeReviewIds, client, (error, res) => {
+          if (!this.mounted) {
+            return;
+          }
+
           const commandResult = toGrpcResult(error, res);
           if (!commandResult.ok) {
             console.error(
@@ -883,6 +904,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       () => {
         let client = new WorkboardClient(grpcWebServerUrl);
         runCommand(client, (error, res) => {
+          if (!this.mounted) {
+            return;
+          }
+
           const commandResult = toGrpcResult(error, res);
           if (!commandResult.ok) {
             console.error(
@@ -1172,6 +1197,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     const thiz = this;
     const seq = ++this.getCodeReviewsSeq;
     client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
+      if (!this.mounted) {
+        return;
+      }
+
       const isStale = seq !== this.getCodeReviewsSeq;
 
       let codeReviewGroups: CodeReviewGroup[] | undefined =
@@ -1208,6 +1237,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
       const seq = ++this.getCodeReviewsSeq;
       client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
+        if (!this.mounted) {
+          return;
+        }
+
         const isStale = seq !== this.getCodeReviewsSeq;
 
         let codeReviewGroups: CodeReviewGroup[] | undefined =
@@ -1246,6 +1279,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     let client = new WorkboardClient(grpcWebServerUrl);
 
     client.RelistReviews(new RelistReviewsCommand(), null, (error, res) => {
+      if (!this.mounted) {
+        return;
+      }
+
       const commandResult = toGrpcResult(error, res);
       this.setState({
         relistCommandGrpcResult: commandResult,
