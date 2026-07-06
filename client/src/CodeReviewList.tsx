@@ -418,9 +418,13 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     let afterHash = 0;
 
     if (
-      // `cfg` is always replaced wholesale (never mutated in place), so a
-      // reference comparison detects config loading and any later change.
+      // `cfg` and `relistCommandGrpcResult` are always replaced wholesale
+      // (never mutated in place), so a reference comparison detects config
+      // loading, a relist result (including an error to show), and any later
+      // change.
       this.state.cfg !== nextState.cfg ||
+      this.state.relistCommandGrpcResult !==
+        nextState.relistCommandGrpcResult ||
       this.state.codeReviewIdsWithActiveCommands.size !=
         nextState.codeReviewIdsWithActiveCommands.size ||
       this.state.codeReviewGroups?.length !=
