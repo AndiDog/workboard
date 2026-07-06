@@ -1220,10 +1220,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           const newCodeReviewIdsWithActiveCommands = new Set(
             prevState.codeReviewIdsWithActiveCommands,
           );
-          if (opts?.removeCodeReviewIdsWithActiveCommands?.length ?? 0 > 0) {
-            for (const codeReviewId of opts?.removeCodeReviewIdsWithActiveCommands!) {
-              newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
-            }
+          for (const codeReviewId of opts?.removeCodeReviewIdsWithActiveCommands ??
+            []) {
+            newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
           }
 
           if (isStale) {
