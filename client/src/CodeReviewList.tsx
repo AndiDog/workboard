@@ -1,4 +1,4 @@
-import { Component } from 'preact';
+import { Component, Fragment } from 'preact';
 import SafeColor from './vendor/safecolor/safecolor';
 import * as timeago from 'timeago.js';
 import {
@@ -1439,9 +1439,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
             {this.state.codeReviewsGrpcResult?.ok &&
               codeReviewGroupsToRender.map((codeReviewGroup) => (
-                <>
+                <Fragment key={codeReviewGroup.groupType}>
                   <tr
-                    key={codeReviewGroup.groupTypeStrWithoutOrderPrefix}
                     className={`code-review-group code-review-group-type-${codeReviewGroup.groupTypeStrWithoutOrderPrefix}`}
                   >
                     <td colSpan={5}>
@@ -1798,7 +1797,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                         </td>
                       </tr>
                     ))}
-                </>
+                </Fragment>
               ))}
           </tbody>
         </table>
