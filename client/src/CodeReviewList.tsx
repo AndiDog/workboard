@@ -199,11 +199,15 @@ function getCodeReviewWeight(
       ++conditionWasTested;
     }
     if (weightRule.condition.hasApprovedBySelf) {
-      conditionHolds = weightRule.condition.approvedBySelf === codeReview.renderOnlyFields.approvedBySelf;
+      conditionHolds =
+        weightRule.condition.approvedBySelf ===
+        codeReview.renderOnlyFields.approvedBySelf;
       ++conditionWasTested;
     }
     if (weightRule.condition.hasApprovedByOthers) {
-      conditionHolds = weightRule.condition.approvedByOthers === codeReview.renderOnlyFields.approvedByOthers;
+      conditionHolds =
+        weightRule.condition.approvedByOthers ===
+        codeReview.renderOnlyFields.approvedByOthers;
       ++conditionWasTested;
     }
 
@@ -688,12 +692,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   ) {
     const thiz = this;
     this.setState(
-      {
+      (prevState) => ({
         codeReviewIdsWithActiveCommands: new Set([
-          ...this.state.codeReviewIdsWithActiveCommands,
+          ...prevState.codeReviewIdsWithActiveCommands,
           ...codeReviewIds,
         ]),
-      },
+      }),
       () => {
         let client = new WorkboardClient(grpcWebServerUrl);
 
@@ -735,12 +739,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   ) {
     const thiz = this;
     this.setState(
-      {
+      (prevState) => ({
         codeReviewIdsWithActiveCommands: new Set([
-          ...this.state.codeReviewIdsWithActiveCommands,
+          ...prevState.codeReviewIdsWithActiveCommands,
           ...codeReviewIds,
         ]),
-      },
+      }),
       () => {
         let client = new WorkboardClient(grpcWebServerUrl);
 
@@ -773,12 +777,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   ) {
     const thiz = this;
     this.setState(
-      {
+      (prevState) => ({
         codeReviewIdsWithActiveCommands: new Set([
-          ...this.state.codeReviewIdsWithActiveCommands,
+          ...prevState.codeReviewIdsWithActiveCommands,
           codeReviewId,
         ]),
-      },
+      }),
       () => {
         let client = new WorkboardClient(grpcWebServerUrl);
         runCommand(client, (error, res) => {
@@ -1071,26 +1075,31 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     const thiz = this;
     const seq = ++this.getCodeReviewsSeq;
     client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
-      if (seq !== this.getCodeReviewsSeq) {
-        // A newer GetCodeReviews request has started; ignore this stale response
-        return;
-      }
-
-      const newCodeReviewIdsWithActiveCommands = new Set(
-        this.state.codeReviewIdsWithActiveCommands,
-      );
-      newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
+      const isStale = seq !== this.getCodeReviewsSeq;
 
       let codeReviewGroups: CodeReviewGroup[] | undefined =
         thiz.state.codeReviewGroups;
-      if (res !== null) {
+      if (!isStale && res !== null) {
         codeReviewGroups = sortCodeReviews(res, this.state.cfg);
       }
 
-      thiz.setState({
-        codeReviewGroups,
-        codeReviewsGrpcResult: toGrpcResult(error, res),
-        codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
+      thiz.setState((prevState): Partial<CodeReviewListState> => {
+        const newCodeReviewIdsWithActiveCommands = new Set(
+          prevState.codeReviewIdsWithActiveCommands,
+        );
+        newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
+
+        if (isStale) {
+          // Only remove from active commands
+          return {
+            codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
+          };
+        }
+        return {
+          codeReviewGroups,
+          codeReviewsGrpcResult: toGrpcResult(error, res),
+          codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
+        };
       });
     });
   }
@@ -1102,30 +1111,36 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
       const seq = ++this.getCodeReviewsSeq;
       client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
-        if (seq !== this.getCodeReviewsSeq) {
-          // A newer GetCodeReviews request has started; ignore this stale response
-          return;
-        }
+        const isStale = seq !== this.getCodeReviewsSeq;
 
         let codeReviewGroups: CodeReviewGroup[] | undefined =
           thiz.state.codeReviewGroups;
-        if (res !== null) {
+        if (!isStale && res !== null) {
           codeReviewGroups = sortCodeReviews(res, this.state.cfg);
         }
 
-        const newCodeReviewIdsWithActiveCommands = new Set(
-          this.state.codeReviewIdsWithActiveCommands,
-        );
-        if (opts?.removeCodeReviewIdsWithActiveCommands?.length ?? 0 > 0) {
-          for (const codeReviewId of opts?.removeCodeReviewIdsWithActiveCommands!) {
-            newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
+        this.setState((prevState): Partial<CodeReviewListState> => {
+          const newCodeReviewIdsWithActiveCommands = new Set(
+            prevState.codeReviewIdsWithActiveCommands,
+          );
+          if (opts?.removeCodeReviewIdsWithActiveCommands?.length ?? 0 > 0) {
+            for (const codeReviewId of opts?.removeCodeReviewIdsWithActiveCommands!) {
+              newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
+            }
           }
-        }
 
-        this.setState({
-          codeReviewGroups,
-          codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
-          codeReviewsGrpcResult: toGrpcResult(error, res),
+          if (isStale) {
+            // Only remove from active commands
+            return {
+              codeReviewIdsWithActiveCommands:
+                newCodeReviewIdsWithActiveCommands,
+            };
+          }
+          return {
+            codeReviewGroups,
+            codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
+            codeReviewsGrpcResult: toGrpcResult(error, res),
+          };
         });
       });
     });
