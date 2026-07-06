@@ -156,6 +156,16 @@ type CodeReviewGroup = {
   sortedCodeReviews: CodeReview[];
 };
 
+const regexCache = new Map<string, RegExp>();
+function getCachedRegex(pattern: string): RegExp {
+  let regExp = regexCache.get(pattern);
+  if (regExp === undefined) {
+    regExp = new RegExp(pattern);
+    regexCache.set(pattern, regExp);
+  }
+  return regExp;
+}
+
 function getCodeReviewWeight(
   codeReview: CodeReview,
   cfg: GrpcResult<Config>,
@@ -175,25 +185,25 @@ function getCodeReviewWeight(
     let conditionWasTested = 0;
 
     if (weightRule.condition.authorContainsRegex !== '') {
-      conditionHolds = new RegExp(
+      conditionHolds = getCachedRegex(
         weightRule.condition.authorContainsRegex,
       ).test(codeReview.renderOnlyFields.authorName);
       ++conditionWasTested;
     }
     if (weightRule.condition.repoNameContainsRegex !== '') {
-      conditionHolds = new RegExp(
+      conditionHolds = getCachedRegex(
         weightRule.condition.repoNameContainsRegex,
       ).test(codeReview.githubFields.repo.name);
       ++conditionWasTested;
     }
     if (weightRule.condition.githubPrPipelineStatusRegex !== '') {
-      conditionHolds = new RegExp(
+      conditionHolds = getCachedRegex(
         weightRule.condition.githubPrPipelineStatusRegex,
       ).test(codeReview.githubFields.statusCheckRollupStatus);
       ++conditionWasTested;
     }
     if (weightRule.condition.repoOrgContainsRegex !== '') {
-      conditionHolds = new RegExp(
+      conditionHolds = getCachedRegex(
         weightRule.condition.repoOrgContainsRegex,
       ).test(codeReview.githubFields.repo.organizationName);
       ++conditionWasTested;
@@ -253,12 +263,21 @@ function sortCodeReviews(
     [groupTypeStr: string]: CodeReview[];
   } = {};
 
+  // Weight of each review, computed once so the comparator below doesn't
+  // recompute it on every comparison
+  const weightByCodeReviewId = new Map<string, number>();
+
   for (const codeReview of res.codeReviews) {
     let groupType: CodeReviewGroupType;
 
     if (codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_DELETED) {
       continue;
     }
+
+    weightByCodeReviewId.set(
+      codeReview.id,
+      getCodeReviewWeight(codeReview, cfg),
+    );
 
     if (codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED) {
       groupType = CodeReviewGroupType.Mentioned;
@@ -301,8 +320,8 @@ function sortCodeReviews(
   // Sort code reviews within each group
   for (const codeReviews of Object.values(groupTypeStrToReviews)) {
     codeReviews.sort((a, b) => {
-      const weightA = getCodeReviewWeight(a, cfg);
-      const weightB = getCodeReviewWeight(b, cfg);
+      const weightA = weightByCodeReviewId.get(a.id) ?? 0;
+      const weightB = weightByCodeReviewId.get(b.id) ?? 0;
 
       return (
         // Highest weight comes first
