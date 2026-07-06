@@ -437,6 +437,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       return true;
     }
 
+    // Sizes are equal at this point, so a one-directional membership check detects any
+    // difference in which groups are collapsed
+    for (const groupType of nextState.hiddenCodeReviewGroups) {
+      if (!this.state.hiddenCodeReviewGroups.has(groupType)) {
+        return true;
+      }
+    }
+
     for (const codeReviewId of this.state.codeReviewIdsWithActiveCommands) {
       beforeHash =
         ((beforeHash << 5) - beforeHash + hashCode(codeReviewId)) & 0xffffffff;
@@ -471,17 +479,53 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       return true;
     }
 
+    // Signature of everything that affects how a row renders or how reviews
+    // are ordered. Including the id makes the order-sensitive rolling hash
+    // detect reorders (e.g. after a manual-weight change), and the remaining
+    // fields catch changes that don't bump `lastRefreshedTimestamp`.
+    const codeReviewSignature = (codeReview: CodeReview): string =>
+      [
+        codeReview.id,
+        codeReview.status,
+        codeReview.lastRefreshedTimestamp,
+        codeReview.lastUpdatedTimestamp,
+        codeReview.lastVisitedTimestamp,
+        codeReview.lastChangedTimestamp,
+        codeReview.lastMentionTimestamp,
+        codeReview.snoozeUntilTimestamp,
+        codeReview.snoozeUntilUpdatedAtChangedFrom,
+        codeReview.hasManualWeightOverride,
+        codeReview.manualWeightOverride,
+        codeReview.githubFields?.status,
+        codeReview.githubFields?.statusCheckRollupStatus,
+        codeReview.githubFields?.isDraft,
+        codeReview.githubFields?.willAutoMerge,
+        codeReview.githubFields?.title,
+        codeReview.githubFields?.url,
+        codeReview.githubFields?.repo?.organizationName,
+        codeReview.githubFields?.repo?.name,
+        codeReview.renderOnlyFields.approvedBySelf,
+        codeReview.renderOnlyFields.approvedByOthers,
+        codeReview.renderOnlyFields.authorName,
+        codeReview.renderOnlyFields.authorIsSelf,
+        codeReview.renderOnlyFields.avatarUrl,
+      ].join('|');
+
     for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
       for (const codeReview of codeReviewGroup.sortedCodeReviews) {
         beforeHash =
-          ((beforeHash << 5) - beforeHash + codeReview.lastRefreshedTimestamp) &
+          ((beforeHash << 5) -
+            beforeHash +
+            hashCode(codeReviewSignature(codeReview))) &
           0xffffffff;
       }
     }
     for (const codeReviewGroup of nextState.codeReviewGroups ?? []) {
       for (const codeReview of codeReviewGroup.sortedCodeReviews) {
         afterHash =
-          ((afterHash << 5) - afterHash + codeReview.lastRefreshedTimestamp) &
+          ((afterHash << 5) -
+            afterHash +
+            hashCode(codeReviewSignature(codeReview))) &
           0xffffffff;
       }
     }
