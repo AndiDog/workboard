@@ -31,6 +31,18 @@ import ErrorBanner from './ErrorBanner';
 
 const safeColor = new SafeColor({ color: [255, 255, 255], contrast: 3 });
 
+// Cache the color per id so a row's two uses (background and link) don't
+// recompute it
+const safeColorCache = new Map<string, string>();
+function safeColorForId(id: string): string {
+  let color = safeColorCache.get(id);
+  if (color === undefined) {
+    color = safeColor.random(id);
+    safeColorCache.set(id, color);
+  }
+  return color;
+}
+
 type CodeReviewListState = {
   cfg: GrpcResult<Config>;
 
@@ -1556,7 +1568,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                             : ''}
                         </td>
                         <td
-                          style={`background-color: rgba${safeColor.random(codeReview.id).substring(3).replace(')', ', 0.1)')}`}
+                          style={`background-color: rgba${safeColorForId(codeReview.id).substring(3).replace(')', ', 0.1)')}`}
                         >
                           {codeReview.renderOnlyFields.avatarUrl.length > 0 && (
                             <img
@@ -1624,7 +1636,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                             className="pr-link"
                             target="_blank"
                             rel="noopener"
-                            style={`color: ${safeColor.random(codeReview.id)}`}
+                            style={`color: ${safeColorForId(codeReview.id)}`}
                             onClick={(_) => this.onVisitReview(codeReview.id)}
                           >
                             {codeReview.githubFields?.title || ''}
