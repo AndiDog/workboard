@@ -102,16 +102,13 @@ func main() {
 	wrappedGrpcServer := grpcweb.WrapServer(grpcServer,
 		grpcweb.WithCorsForRegisteredEndpointsOnly(false),
 		grpcweb.WithOriginFunc(func(origin string) bool { return slices.Contains(gprcWebAllowedCorsOrigins, origin) }))
-	handler := func(resp http.ResponseWriter, req *http.Request) {
-		wrappedGrpcServer.ServeHTTP(resp, req)
-	}
 	grpcWebListenAddress := os.Getenv("GRPC_WEB_LISTEN_STRING")
 	if grpcWebListenAddress == "" {
 		logger.Fatal("Missing GRPC_WEB_LISTEN_STRING environment variable")
 	}
 	http2Server := http.Server{
 		Addr:              grpcWebListenAddress,
-		Handler:           http.HandlerFunc(handler),
+		Handler:           http.HandlerFunc(wrappedGrpcServer.ServeHTTP),
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       30 * time.Second,
 	}

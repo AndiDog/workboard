@@ -144,12 +144,8 @@ enum CodeReviewGroupType {
   Snoozed = '900-snoozed',
 }
 
-const codeReviewGroupTypes: Array<CodeReviewGroupType> = Object.keys(
-  CodeReviewGroupType,
-).map((groupType) => {
-  const key = groupType as keyof typeof CodeReviewGroupType;
-  return CodeReviewGroupType[key];
-});
+const codeReviewGroupTypes: Array<CodeReviewGroupType> =
+  Object.values(CodeReviewGroupType);
 
 const codeReviewGroupTypeHeaderDescription: {
   [groupType in CodeReviewGroupType]: string;
@@ -1486,11 +1482,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                         ]
                       }
                       <span
-                        title={`${codeReviewGroup.sortedCodeReviews.length} review${
-                          codeReviewGroup.sortedCodeReviews.length == 1
-                            ? ''
-                            : 's'
-                        }`}
+                        title={`${codeReviewGroup.sortedCodeReviews.length} ${simplePlural(
+                          codeReviewGroup.sortedCodeReviews.length,
+                          'review',
+                        )}`}
                       >
                         {' '}
                         ({codeReviewGroup.sortedCodeReviews.length})

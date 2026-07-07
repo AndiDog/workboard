@@ -37,11 +37,7 @@ func (db *Database) Close() error {
 
 // Delete removes the given key from the database. A missing key is not an error.
 func (db *Database) Delete(key string) error {
-	err := db.roseDB.Delete([]byte(key))
-	if err != nil {
-		return err
-	}
-	return nil
+	return db.roseDB.Delete([]byte(key))
 }
 
 // Get fills the pointer `value` with the value from the database. If the key
@@ -77,9 +73,5 @@ func (db *Database) Set(key string, value any) error {
 		return fmt.Errorf("failed to serialize as JSON: %w", err)
 	}
 
-	err = db.roseDB.Put([]byte(key), dbValue)
-	if err != nil {
-		return err
-	}
-	return nil
+	return db.roseDB.Put([]byte(key), dbValue)
 }
