@@ -112,6 +112,18 @@ tr.code-review-group {
   font-weight: bold;
 }
 
+tr.code-review-group-type-ignored {
+  background: repeating-linear-gradient(
+    315deg,
+    #eee 0,
+    #eee 1em,
+    #cfcfcf 1em,
+    #cfcfcf 1.2em,
+    #eee 1.2em
+  );
+  color: #999;
+}
+
 tr.code-review-group-type-mentioned {
   background: repeating-linear-gradient(
     315deg,

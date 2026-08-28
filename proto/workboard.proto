@@ -126,7 +126,8 @@ message WeightRule {
 
   // PRs with higher weight are shown first to the user (= higher priority, but
   // the term "priority" isn't well-understood regarding what's positive vs.
-  // negative numbers)
+  // negative numbers). A PR whose final weight is -1000 or less is put into
+  // the "Ignored" category which is displayed last.
   int32 weight_change = 2;
 }
 

@@ -142,6 +142,7 @@ enum CodeReviewGroupType {
   Rest = '700-rest',
   Reviewed = '800-reviewed',
   Snoozed = '900-snoozed',
+  Ignored = '950-ignored',
 }
 
 const codeReviewGroupTypes: Array<CodeReviewGroupType> =
@@ -156,7 +157,11 @@ const codeReviewGroupTypeHeaderDescription: {
   [CodeReviewGroupType.Rest]: 'Other',
   [CodeReviewGroupType.Reviewed]: 'Reviewed',
   [CodeReviewGroupType.Snoozed]: 'Snoozed',
+  [CodeReviewGroupType.Ignored]: 'Ignored',
 };
+
+// Final weight at or below which a code review is considered ignored
+const ignoredWeightThreshold = -1000;
 
 type CodeReviewGroup = {
   groupType: CodeReviewGroupType;
@@ -282,12 +287,14 @@ function sortCodeReviews(
       continue;
     }
 
-    weightByCodeReviewId.set(
-      codeReview.id,
-      getCodeReviewWeight(codeReview, cfg),
-    );
+    const weight = getCodeReviewWeight(codeReview, cfg);
+    weightByCodeReviewId.set(codeReview.id, weight);
 
-    if (codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED) {
+    if (weight <= ignoredWeightThreshold) {
+      groupType = CodeReviewGroupType.Ignored;
+    } else if (
+      codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED
+    ) {
       groupType = CodeReviewGroupType.Mentioned;
     } else if (
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MERGED ||
@@ -395,6 +402,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       hiddenCodeReviewGroups: new Set([
         CodeReviewGroupType.Reviewed,
         CodeReviewGroupType.Snoozed,
+        CodeReviewGroupType.Ignored,
       ]),
       searchEnabled: false,
       searchText: '',
