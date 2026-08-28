@@ -23,7 +23,16 @@ import {
   GetConfigQuery,
   SetCodeReviewManualWeightCommand,
 } from './generated/workboard';
-import { GrpcResult, makePendingGrpcResult, toGrpcResult } from './grpc';
+import {
+  grpcBatchTimeoutMs,
+  grpcCommandTimeoutMs,
+  grpcDeadline,
+  grpcQueryTimeoutMs,
+  GrpcResult,
+  isGrpcTimeout,
+  makePendingGrpcResult,
+  toGrpcResult,
+} from './grpc';
 import Spinner from './Spinner';
 import { RpcError } from 'grpc-web';
 import { grpcWebServerUrl } from './config';
@@ -41,6 +50,13 @@ function safeColorForId(id: string): string {
     safeColorCache.set(id, color);
   }
   return color;
+}
+
+function alertCommandTimeout(commandDesc: string) {
+  alert(
+    `Command "${commandDesc}" timed out after ${grpcCommandTimeoutMs / 1000} seconds. ` +
+      'It may still be running on the server, so the list will be refreshed.',
+  );
 }
 
 type CodeReviewListState = {
@@ -416,30 +432,34 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     let client = new WorkboardClient(grpcWebServerUrl);
 
-    client.GetConfig(new GetConfigQuery(), null, (error, res) => {
-      if (!this.mounted) {
-        return;
-      }
-
-      const cfg = toGrpcResult(error, res);
-
-      // Code reviews may have been sorted while the config was still pending
-      // (all weights zero). Re-sort them now that the real config is known.
-      this.setState((prevState): Partial<CodeReviewListState> => {
-        let codeReviewGroups = prevState.codeReviewGroups;
-        if (cfg.ok && prevState.codeReviewsGrpcResult?.ok) {
-          codeReviewGroups = sortCodeReviews(
-            prevState.codeReviewsGrpcResult.res,
-            cfg,
-          );
+    client.GetConfig(
+      new GetConfigQuery(),
+      grpcDeadline(grpcQueryTimeoutMs),
+      (error, res) => {
+        if (!this.mounted) {
+          return;
         }
 
-        return {
-          cfg,
-          codeReviewGroups,
-        };
-      });
-    });
+        const cfg = toGrpcResult(error, res);
+
+        // Code reviews may have been sorted while the config was still pending
+        // (all weights zero). Re-sort them now that the real config is known.
+        this.setState((prevState): Partial<CodeReviewListState> => {
+          let codeReviewGroups = prevState.codeReviewGroups;
+          if (cfg.ok && prevState.codeReviewsGrpcResult?.ok) {
+            codeReviewGroups = sortCodeReviews(
+              prevState.codeReviewsGrpcResult.res,
+              cfg,
+            );
+          }
+
+          return {
+            cfg,
+            codeReviewGroups,
+          };
+        });
+      },
+    );
 
     this.refreshIntervalCancel = setInterval(
       this.onIntervalBasedRefresh.bind(this),
@@ -779,7 +799,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           new RefreshReviewsCommand({
             codeReviewIds,
           }),
-          null,
+          grpcDeadline(grpcBatchTimeoutMs),
           (error, res) => {
             --this.numRunningAutoRefreshRequests;
 
@@ -816,6 +836,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         let client = new WorkboardClient(grpcWebServerUrl);
 
         let numDone = 0;
+        let timeoutAlerted = false;
 
         for (const codeReviewId of codeReviewIds) {
           runCommand(codeReviewId, client, (error, res) => {
@@ -828,6 +849,11 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               console.error(
                 `Command failed (${commandDesc}): ${commandResult.error}`,
               );
+
+              if (!timeoutAlerted && isGrpcTimeout(commandResult.error)) {
+                timeoutAlerted = true;
+                alertCommandTimeout(commandDesc);
+              }
 
               // Continue to refresh since that will remove the code review from `codeReviewIdsWithActiveCommands`
               // and after an error, it's probably a good idea to get the latest data.
@@ -846,6 +872,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  // Unlike the other `runCommand...` helpers, this one serves background
+  // auto-refresh, so timeouts are only logged instead of interrupting the user
   runCommandOnManyCodeReviews(
     codeReviewIds: Array<string>,
     commandDesc: string,
@@ -918,6 +946,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               `Command failed (${commandDesc}): ${commandResult.error}`,
             );
 
+            if (isGrpcTimeout(commandResult.error)) {
+              alertCommandTimeout(commandDesc);
+            }
+
             // Continue to refresh since that will remove the code review from `codeReviewIdsWithActiveCommands`
             // and after an error, it's probably a good idea to get the latest data.
           }
@@ -941,7 +973,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.DeleteReview(
           new DeleteReviewCommand({ codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -970,7 +1002,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (codeReviewId, client, onResult) => {
         client.DeleteReview(
           new DeleteReviewCommand({ codeReviewId: codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -998,7 +1030,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.MarkMustReview(
           new MarkMustReviewCommand({ codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1013,7 +1045,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.RefreshReview(
           new RefreshReviewCommand({ codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1052,7 +1084,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
             codeReviewId: codeReview.id,
             manualWeightOverride: weightValue,
           }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1073,7 +1105,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.ReviewedDeleteOnMerge(
           new ReviewedDeleteOnMergeCommand({ codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1110,7 +1142,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.SnoozeUntilMentioned(
           new SnoozeUntilMentionedCommand({ codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1142,7 +1174,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
               Date.now() / 1000 + secondsFromNow,
             ),
           }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1157,7 +1189,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.SnoozeUntilUpdate(
           new SnoozeUntilUpdateCommand({ codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1188,7 +1220,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       (client, onResult) => {
         client.MarkVisited(
           new MarkVisitedCommand({ codeReviewId }),
-          null,
+          grpcDeadline(grpcCommandTimeoutMs),
           onResult,
         );
       },
@@ -1200,47 +1232,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
     const thiz = this;
     const seq = ++this.getCodeReviewsSeq;
-    client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
-      if (!this.mounted) {
-        return;
-      }
-
-      const isStale = seq !== this.getCodeReviewsSeq;
-
-      let codeReviewGroups: CodeReviewGroup[] | undefined =
-        thiz.state.codeReviewGroups;
-      if (!isStale && res !== null) {
-        codeReviewGroups = sortCodeReviews(res, this.state.cfg);
-      }
-
-      thiz.setState((prevState): Partial<CodeReviewListState> => {
-        const newCodeReviewIdsWithActiveCommands = new Set(
-          prevState.codeReviewIdsWithActiveCommands,
-        );
-        newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
-
-        if (isStale) {
-          // Only remove from active commands
-          return {
-            codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
-          };
-        }
-        return {
-          codeReviewGroups,
-          codeReviewsGrpcResult: toGrpcResult(error, res),
-          codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
-        };
-      });
-    });
-  }
-
-  refresh(opts?: { removeCodeReviewIdsWithActiveCommands?: Array<string> }) {
-    const thiz = this;
-    this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
-      let client = new WorkboardClient(grpcWebServerUrl);
-
-      const seq = ++this.getCodeReviewsSeq;
-      client.GetCodeReviews(new GetCodeReviewsQuery(), null, (error, res) => {
+    client.GetCodeReviews(
+      new GetCodeReviewsQuery(),
+      grpcDeadline(grpcQueryTimeoutMs),
+      (error, res) => {
         if (!this.mounted) {
           return;
         }
@@ -1253,14 +1248,11 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           codeReviewGroups = sortCodeReviews(res, this.state.cfg);
         }
 
-        this.setState((prevState): Partial<CodeReviewListState> => {
+        thiz.setState((prevState): Partial<CodeReviewListState> => {
           const newCodeReviewIdsWithActiveCommands = new Set(
             prevState.codeReviewIdsWithActiveCommands,
           );
-          for (const codeReviewId of opts?.removeCodeReviewIdsWithActiveCommands ??
-            []) {
-            newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
-          }
+          newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
 
           if (isStale) {
             // Only remove from active commands
@@ -1271,33 +1263,89 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           }
           return {
             codeReviewGroups,
-            codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
             codeReviewsGrpcResult: toGrpcResult(error, res),
+            codeReviewIdsWithActiveCommands: newCodeReviewIdsWithActiveCommands,
           };
         });
-      });
+      },
+    );
+  }
+
+  refresh(opts?: { removeCodeReviewIdsWithActiveCommands?: Array<string> }) {
+    const thiz = this;
+    this.setState({ codeReviewsGrpcResult: makePendingGrpcResult() }, () => {
+      let client = new WorkboardClient(grpcWebServerUrl);
+
+      const seq = ++this.getCodeReviewsSeq;
+      client.GetCodeReviews(
+        new GetCodeReviewsQuery(),
+        grpcDeadline(grpcQueryTimeoutMs),
+        (error, res) => {
+          if (!this.mounted) {
+            return;
+          }
+
+          const isStale = seq !== this.getCodeReviewsSeq;
+
+          let codeReviewGroups: CodeReviewGroup[] | undefined =
+            thiz.state.codeReviewGroups;
+          if (!isStale && res !== null) {
+            codeReviewGroups = sortCodeReviews(res, this.state.cfg);
+          }
+
+          this.setState((prevState): Partial<CodeReviewListState> => {
+            const newCodeReviewIdsWithActiveCommands = new Set(
+              prevState.codeReviewIdsWithActiveCommands,
+            );
+            for (const codeReviewId of opts?.removeCodeReviewIdsWithActiveCommands ??
+              []) {
+              newCodeReviewIdsWithActiveCommands.delete(codeReviewId);
+            }
+
+            if (isStale) {
+              // Only remove from active commands
+              return {
+                codeReviewIdsWithActiveCommands:
+                  newCodeReviewIdsWithActiveCommands,
+              };
+            }
+            return {
+              codeReviewGroups,
+              codeReviewIdsWithActiveCommands:
+                newCodeReviewIdsWithActiveCommands,
+              codeReviewsGrpcResult: toGrpcResult(error, res),
+            };
+          });
+        },
+      );
     });
   }
 
   relist() {
     let client = new WorkboardClient(grpcWebServerUrl);
 
-    client.RelistReviews(new RelistReviewsCommand(), null, (error, res) => {
-      if (!this.mounted) {
-        return;
-      }
+    client.RelistReviews(
+      new RelistReviewsCommand(),
+      grpcDeadline(grpcBatchTimeoutMs),
+      (error, res) => {
+        if (!this.mounted) {
+          return;
+        }
 
-      const commandResult = toGrpcResult(error, res);
-      this.setState({
-        relistCommandGrpcResult: commandResult,
-      });
-      if (!commandResult.ok) {
-        console.error(`Command failed (RelistReviews): ${commandResult.error}`);
-        return;
-      }
+        const commandResult = toGrpcResult(error, res);
+        this.setState({
+          relistCommandGrpcResult: commandResult,
+        });
+        if (!commandResult.ok) {
+          console.error(
+            `Command failed (RelistReviews): ${commandResult.error}`,
+          );
+          return;
+        }
 
-      this.refresh();
-    });
+        this.refresh();
+      },
+    );
   }
 
   searchTextMatchesCodeReview(codeReview: CodeReview): boolean {
