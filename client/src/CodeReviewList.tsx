@@ -219,6 +219,12 @@ function getCodeReviewWeight(
       ).test(codeReview.renderOnlyFields.authorName);
       ++conditionWasTested;
     }
+    if (weightRule.condition.codeReviewTitleContainsRegex !== '') {
+      conditionHolds = getCachedRegex(
+        weightRule.condition.codeReviewTitleContainsRegex,
+      ).test(codeReview.githubFields.title);
+      ++conditionWasTested;
+    }
     if (weightRule.condition.repoNameContainsRegex !== '') {
       conditionHolds = getCachedRegex(
         weightRule.condition.repoNameContainsRegex,

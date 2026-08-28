@@ -73,7 +73,7 @@ func main() {
 
 	cfg, err := config.ReadConfig()
 	if err != nil {
-		logger.Fatal("Invalid config: %s", err)
+		logger.Fatalf("Invalid config: %s", err)
 	}
 	logger.Infow("Config", "weight_rules_len", len(cfg.WeightRules))
 
