@@ -1254,6 +1254,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     const codeReviewGroupsToRender: CodeReviewGroup[] = [];
 
     let numCodeReviews = 0;
+    let numIgnoredCodeReviews = 0;
     let numSnoozedCodeReviews = 0;
     let numDeletableCodeReviews = 0;
     for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
@@ -1287,7 +1288,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
         ++numCodeReviews;
 
-        if (
+        if (codeReview.renderOnlyFields.weight <= ignoredWeightThreshold) {
+          ++numIgnoredCodeReviews;
+        } else if (
           codeReview.status ==
             CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED ||
           codeReview.status ==
@@ -1357,9 +1360,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                     />
                   )}
                   <span class="statistics">
-                    {numCodeReviews - numSnoozedCodeReviews}{' '}
+                    {numCodeReviews -
+                      numSnoozedCodeReviews -
+                      numIgnoredCodeReviews}{' '}
                     {simplePlural(numCodeReviews, 'code review')} (
-                    {numSnoozedCodeReviews} snoozed, {numCodeReviews} total)
+                    {numSnoozedCodeReviews} snoozed, {numIgnoredCodeReviews}{' '}
+                    ignored, {numCodeReviews} total)
                   </span>
                   {this.state.codeReviewIdsWithActiveCommands.size > 0 && (
                     <Spinner />
