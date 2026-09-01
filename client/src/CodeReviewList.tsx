@@ -19,8 +19,6 @@ import {
   MarkVisitedCommand,
   RelistReviewsCommand,
   RefreshReviewsCommand,
-  Config,
-  GetConfigQuery,
   SetCodeReviewManualWeightCommand,
 } from './generated/workboard';
 import {
@@ -60,8 +58,6 @@ function alertCommandTimeout(commandDesc: string) {
 }
 
 type CodeReviewListState = {
-  cfg: GrpcResult<Config>;
-
   codeReviewGroups?: CodeReviewGroup[];
   codeReviewsGrpcResult?: GrpcResult<GetCodeReviewsResponse>;
 
@@ -185,94 +181,6 @@ type CodeReviewGroup = {
   sortedCodeReviews: CodeReview[];
 };
 
-const regexCache = new Map<string, RegExp>();
-function getCachedRegex(pattern: string): RegExp {
-  let regExp = regexCache.get(pattern);
-  if (regExp === undefined) {
-    regExp = new RegExp(pattern);
-    regexCache.set(pattern, regExp);
-  }
-  return regExp;
-}
-
-function getCodeReviewWeight(
-  codeReview: CodeReview,
-  cfg: GrpcResult<Config>,
-): number {
-  if (!cfg.ok) {
-    return 0;
-  }
-
-  // Use manual override if set
-  if (codeReview.hasManualWeightOverride) {
-    return codeReview.manualWeightOverride;
-  }
-
-  let weight = 0;
-  for (const weightRule of cfg.res.weightRules) {
-    let conditionHolds = false;
-    let conditionWasTested = 0;
-
-    if (weightRule.condition.authorContainsRegex !== '') {
-      conditionHolds = getCachedRegex(
-        weightRule.condition.authorContainsRegex,
-      ).test(codeReview.renderOnlyFields.authorName);
-      ++conditionWasTested;
-    }
-    if (weightRule.condition.codeReviewTitleContainsRegex !== '') {
-      conditionHolds = getCachedRegex(
-        weightRule.condition.codeReviewTitleContainsRegex,
-      ).test(codeReview.githubFields.title);
-      ++conditionWasTested;
-    }
-    if (weightRule.condition.repoNameContainsRegex !== '') {
-      conditionHolds = getCachedRegex(
-        weightRule.condition.repoNameContainsRegex,
-      ).test(codeReview.githubFields.repo.name);
-      ++conditionWasTested;
-    }
-    if (weightRule.condition.githubPrPipelineStatusRegex !== '') {
-      conditionHolds = getCachedRegex(
-        weightRule.condition.githubPrPipelineStatusRegex,
-      ).test(codeReview.githubFields.statusCheckRollupStatus);
-      ++conditionWasTested;
-    }
-    if (weightRule.condition.repoOrgContainsRegex !== '') {
-      conditionHolds = getCachedRegex(
-        weightRule.condition.repoOrgContainsRegex,
-      ).test(codeReview.githubFields.repo.organizationName);
-      ++conditionWasTested;
-    }
-    if (weightRule.condition.hasApprovedBySelf) {
-      conditionHolds =
-        weightRule.condition.approvedBySelf ===
-        codeReview.renderOnlyFields.approvedBySelf;
-      ++conditionWasTested;
-    }
-    if (weightRule.condition.hasApprovedByOthers) {
-      conditionHolds =
-        weightRule.condition.approvedByOthers ===
-        codeReview.renderOnlyFields.approvedByOthers;
-      ++conditionWasTested;
-    }
-
-    if (!conditionWasTested) {
-      throw new Error('Unimplemented weight rule condition');
-    }
-    if (conditionWasTested > 1) {
-      throw new Error(
-        'Configuration is invalid: must only use one weight rule condition (no `AND` support)',
-      );
-    }
-
-    if (conditionHolds) {
-      weight += weightRule.weightChange;
-    }
-  }
-
-  return weight;
-}
-
 function hashCode(str: string): number {
   let hash = 0;
   for (let i = 0, len = str.length; i < len; i++) {
@@ -290,17 +198,10 @@ function simplePlural(count: number, singular: string) {
   return singular + 's';
 }
 
-function sortCodeReviews(
-  res: GetCodeReviewsResponse,
-  cfg: GrpcResult<Config>,
-): CodeReviewGroup[] {
+function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
   const groupTypeStrToReviews: {
     [groupTypeStr: string]: CodeReview[];
   } = {};
-
-  // Weight of each review, computed once so the comparator below doesn't
-  // recompute it on every comparison
-  const weightByCodeReviewId = new Map<string, number>();
 
   for (const codeReview of res.codeReviews) {
     let groupType: CodeReviewGroupType;
@@ -309,10 +210,7 @@ function sortCodeReviews(
       continue;
     }
 
-    const weight = getCodeReviewWeight(codeReview, cfg);
-    weightByCodeReviewId.set(codeReview.id, weight);
-
-    if (weight <= ignoredWeightThreshold) {
+    if (codeReview.renderOnlyFields.weight <= ignoredWeightThreshold) {
       groupType = CodeReviewGroupType.Ignored;
     } else if (
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED
@@ -357,12 +255,9 @@ function sortCodeReviews(
   // Sort code reviews within each group
   for (const codeReviews of Object.values(groupTypeStrToReviews)) {
     codeReviews.sort((a, b) => {
-      const weightA = weightByCodeReviewId.get(a.id) ?? 0;
-      const weightB = weightByCodeReviewId.get(b.id) ?? 0;
-
       return (
         // Highest weight comes first
-        weightB - weightA ||
+        b.renderOnlyFields.weight - a.renderOnlyFields.weight ||
         // Reviews with latest changes are displayed on top, ordered by status
         (statusSortOrder[a.status] || 999) -
           (statusSortOrder[b.status] || 999) ||
@@ -418,7 +313,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.getCodeReviewsSeq = 0;
     this.mounted = false;
     this.state = {
-      cfg: makePendingGrpcResult(),
       codeReviewGroups: undefined,
       codeReviewIdsWithActiveCommands: new Set(),
       hiddenCodeReviewGroups: new Set([
@@ -435,37 +329,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     this.mounted = true;
 
     this.refresh();
-
-    let client = new WorkboardClient(grpcWebServerUrl);
-
-    client.GetConfig(
-      new GetConfigQuery(),
-      grpcDeadline(grpcQueryTimeoutMs),
-      (error, res) => {
-        if (!this.mounted) {
-          return;
-        }
-
-        const cfg = toGrpcResult(error, res);
-
-        // Code reviews may have been sorted while the config was still pending
-        // (all weights zero). Re-sort them now that the real config is known.
-        this.setState((prevState): Partial<CodeReviewListState> => {
-          let codeReviewGroups = prevState.codeReviewGroups;
-          if (cfg.ok && prevState.codeReviewsGrpcResult?.ok) {
-            codeReviewGroups = sortCodeReviews(
-              prevState.codeReviewsGrpcResult.res,
-              cfg,
-            );
-          }
-
-          return {
-            cfg,
-            codeReviewGroups,
-          };
-        });
-      },
-    );
 
     this.refreshIntervalCancel = setInterval(
       this.onIntervalBasedRefresh.bind(this),
@@ -492,11 +355,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     let afterHash = 0;
 
     if (
-      // `cfg` and `relistCommandGrpcResult` are always replaced wholesale
-      // (never mutated in place), so a reference comparison detects config
-      // loading, a relist result (including an error to show), and any later
-      // change.
-      this.state.cfg !== nextState.cfg ||
+      // `relistCommandGrpcResult` is always replaced wholesale (never mutated
+      // in place), so a reference comparison detects a relist result
+      // (including an error to show) and any later change.
       this.state.relistCommandGrpcResult !==
         nextState.relistCommandGrpcResult ||
       this.state.codeReviewIdsWithActiveCommands.size !=
@@ -583,6 +444,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         codeReview.renderOnlyFields.authorName,
         codeReview.renderOnlyFields.authorIsSelf,
         codeReview.renderOnlyFields.avatarUrl,
+        codeReview.renderOnlyFields.weight,
       ].join('|');
 
     for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
@@ -1060,7 +922,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
 
   private onSetManualWeight(codeReview: CodeReview, event: Event) {
     event.preventDefault();
-    const currentWeight = getCodeReviewWeight(codeReview, this.state.cfg);
+    const currentWeight = codeReview.renderOnlyFields.weight;
     const input = window.prompt(
       'Enter manual weight override (leave empty to clear):',
       currentWeight.toString(),
@@ -1251,7 +1113,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         let codeReviewGroups: CodeReviewGroup[] | undefined =
           thiz.state.codeReviewGroups;
         if (!isStale && res !== null) {
-          codeReviewGroups = sortCodeReviews(res, this.state.cfg);
+          codeReviewGroups = sortCodeReviews(res);
         }
 
         thiz.setState((prevState): Partial<CodeReviewListState> => {
@@ -1296,7 +1158,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           let codeReviewGroups: CodeReviewGroup[] | undefined =
             thiz.state.codeReviewGroups;
           if (!isStale && res !== null) {
-            codeReviewGroups = sortCodeReviews(res, this.state.cfg);
+            codeReviewGroups = sortCodeReviews(res);
           }
 
           this.setState((prevState): Partial<CodeReviewListState> => {
@@ -1386,18 +1248,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   }
 
   render() {
-    if (this.state.cfg.pending) {
-      return <Spinner />;
-    }
-
-    if (!this.state.cfg.ok) {
-      return (
-        <ErrorBanner
-          error={`Failed to get config: ${this.state.cfg.error.message}`}
-        />
-      );
-    }
-
     const nowTimestamp = Date.now() / 1000;
 
     // The ones to be rendered (can be filtered by search, deleted status, etc.).
@@ -1859,8 +1709,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
                                 codeReview.id,
                               )}
                             >
-                              Set weight (
-                              {getCodeReviewWeight(codeReview, this.state.cfg)})
+                              Set weight ({codeReview.renderOnlyFields.weight})
                             </button>
                             <button
                               onClick={(event) =>

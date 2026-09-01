@@ -6,9 +6,12 @@ option go_package = "andidog.de/workboard/proto";
 // MESSAGES
 
 message CodeReviewRenderOnlyFields {
-  // These fields depend on configuration and don't represent the code review
-  // itself. For example, `author_is_self` depends for which user the code
-  // reviews are listed.
+  // These fields don't represent the code review itself, but are only used for
+  // rendering. The ones which depend on configuration (`approved_by_others`,
+  // `approved_by_self`, `author_is_self`, `weight`) are calculated on each read
+  // and never stored, so a configuration change applies immediately.
+  // `author_name` and `avatar_url` come from the platform (e.g. GitHub) and are
+  // stored.
   bool author_is_self = 1;
 
   // Whether the PR was approved by the current user (gitHubUserSelf)
@@ -22,6 +25,10 @@ message CodeReviewRenderOnlyFields {
 
   // Can be empty
   string avatar_url = 2;
+
+  // Calculated from the configured weight rules, or the manual weight override
+  // if one is set
+  int32 weight = 6;
 }
 
 // Pull/merge request on a platform like GitHub
@@ -113,6 +120,14 @@ message GitHubPullRequestFields {
   bool is_draft = 8;
   int64 updated_at_timestamp = 5;
   bool will_auto_merge = 9;
+
+  // Login of the pull request author
+  string author_login = 10;
+
+  // Logins of the users who approved the pull request. Only the raw logins are
+  // stored so that the configuration-dependent `approved_by_self` and
+  // `approved_by_others` can be calculated on each read.
+  repeated string approved_by_logins = 11;
 }
 
 message GitHubRepo {
@@ -206,8 +221,6 @@ service Workboard {
   rpc DeleteReview(DeleteReviewCommand) returns (CommandResponse) {}
 
   rpc GetCodeReviews(GetCodeReviewsQuery) returns (GetCodeReviewsResponse) {}
-
-  rpc GetConfig(GetConfigQuery) returns (Config) {}
 
   rpc MarkMustReview(MarkMustReviewCommand) returns (CommandResponse) {}
 

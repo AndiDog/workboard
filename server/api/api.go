@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +25,11 @@ const deleteAfterNowSeconds = 86400 * 30
 type WorkboardServer struct {
 	proto.UnimplementedWorkboardServer
 
-	cfg     *proto.Config
-	db      *database.Database
-	dbMutex sync.Mutex
-	logger  *zap.SugaredLogger
+	cfg         *proto.Config
+	db          *database.Database
+	dbMutex     sync.Mutex
+	logger      *zap.SugaredLogger
+	weightRules []compiledWeightRule
 
 	gitHubClient        *github.Client
 	gitHubGraphQLClient *githubv4.Client
@@ -37,10 +39,17 @@ func NewWorkboardServer(cfg *proto.Config, db *database.Database, logger *zap.Su
 	if db == nil {
 		return nil, errors.New("db must not be nil")
 	}
+
+	weightRules, err := compileWeightRules(cfg.GetWeightRules())
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid configuration")
+	}
+
 	return &WorkboardServer{
-		cfg:    cfg,
-		db:     db,
-		logger: logger,
+		cfg:         cfg,
+		db:          db,
+		logger:      logger,
+		weightRules: weightRules,
 	}, nil
 }
 
@@ -50,7 +59,7 @@ type PR struct {
 
 // convertGitHubToWorkboardCodeReview converts to our protobuf message type `CodeReview` and in case the code review
 // already exists, merges the new information in `issue` with existing fields. The existing value is not mutated.
-func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo string, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUserSelf string, gitHubMentionTriggers []string, extraInfo ExtraInfoGraphQLQuery, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo string, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubMentionTriggers []string, extraInfo ExtraInfoGraphQLQuery, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	id := getWorkboardCodeReviewIdFromGitHubIssue(issue)
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
@@ -79,13 +88,15 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		statusCheckRollupQueryState = extraInfo.Repository.PullRequest.Commits.Nodes[0].Commit.StatusCheckRollup.State
 	}
 
-	authorName := ""
+	authorLogin := ""
 	if issue.User != nil && issue.User.Login != nil {
-		authorName = *issue.User.Login
+		authorLogin = *issue.User.Login
 	}
 	if extraInfo.Repository.PullRequest.Author.Login != "" {
-		authorName = extraInfo.Repository.PullRequest.Author.Login
+		authorLogin = extraInfo.Repository.PullRequest.Author.Login
 	}
+
+	authorName := authorLogin
 	if issue.User != nil && issue.User.Name != nil {
 		authorName = *issue.User.Name
 	}
@@ -115,15 +126,10 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 		}
 	}
 
-	approvedBySelf := false
-	approvedByOthers := false
+	var approvedByLogins []string
 	for _, review := range extraInfo.Repository.PullRequest.Reviews.Nodes {
-		if review.State == "APPROVED" {
-			if review.Author.Login == gitHubUserSelf {
-				approvedBySelf = true
-			} else {
-				approvedByOthers = true
-			}
+		if review.State == "APPROVED" && !slices.Contains(approvedByLogins, review.Author.Login) {
+			approvedByLogins = append(approvedByLogins, review.Author.Login)
 		}
 	}
 
@@ -143,15 +149,15 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 			IsDraft:                 extraInfo.Repository.PullRequest.IsDraft,
 			UpdatedAtTimestamp:      updatedAtTimestamp,
 			WillAutoMerge:           extraInfo.Repository.PullRequest.AutoMergeRequest.EnabledAt != nil,
+			AuthorLogin:             authorLogin,
+			ApprovedByLogins:        approvedByLogins,
 		},
 
-		// TODO Rather only fill these at render time, which was the purpose of the field
+		// Only the fields which don't depend on configuration are stored. The rest is filled by
+		// `fillConfigDependentRenderOnlyFields` on each read.
 		RenderOnlyFields: &proto.CodeReviewRenderOnlyFields{
-			AuthorIsSelf:     issue.User != nil && issue.User.Login != nil && *issue.User.Login == gitHubUserSelf,
-			ApprovedBySelf:   approvedBySelf,
-			ApprovedByOthers: approvedByOthers,
-			AuthorName:       authorName,
-			AvatarUrl:        conditionalUserAvatarUrl(&extraInfo, logger),
+			AuthorName: authorName,
+			AvatarUrl:  conditionalUserAvatarUrl(&extraInfo, logger),
 		},
 
 		LastChangedTimestamp:                       0,
@@ -461,7 +467,7 @@ type ExtraInfoGraphQLQuery struct {
 	} `graphql:"repository(owner: $owner, name: $name)"`
 }
 
-func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubUser string, gitHubMentionTriggers []string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubMentionTriggers []string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
 	owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
 	if err != nil {
 		return nil, err
@@ -495,11 +501,35 @@ func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, iss
 		logger.Warnw("Failed to delete obsolete avatar URL from database", "err", err)
 	}
 
-	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, getCodeReviewById, gitHubUser, gitHubMentionTriggers, extraInfo, logger)
+	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, getCodeReviewById, gitHubMentionTriggers, extraInfo, logger)
 	if err != nil {
 		return nil, err
 	}
 	return codeReview, nil
+}
+
+// fillConfigDependentRenderOnlyFields calculates those `render_only_fields` which depend on configuration and
+// are therefore not stored. Filling them on each read means a configuration change applies immediately, without
+// having to refresh code reviews from the platform (e.g. GitHub).
+func (s *WorkboardServer) fillConfigDependentRenderOnlyFields(codeReview *proto.CodeReview, gitHubUserSelf string) {
+	if codeReview.RenderOnlyFields == nil {
+		codeReview.RenderOnlyFields = &proto.CodeReviewRenderOnlyFields{}
+	}
+
+	codeReview.RenderOnlyFields.AuthorIsSelf = codeReview.GetGithubFields().GetAuthorLogin() == gitHubUserSelf
+
+	codeReview.RenderOnlyFields.ApprovedBySelf = false
+	codeReview.RenderOnlyFields.ApprovedByOthers = false
+	for _, login := range codeReview.GetGithubFields().GetApprovedByLogins() {
+		if login == gitHubUserSelf {
+			codeReview.RenderOnlyFields.ApprovedBySelf = true
+		} else {
+			codeReview.RenderOnlyFields.ApprovedByOthers = true
+		}
+	}
+
+	// Weight rule conditions can use the fields above, so calculate the weight last
+	codeReview.RenderOnlyFields.Weight = calculateCodeReviewWeight(codeReview, s.weightRules)
 }
 
 func (s *WorkboardServer) getGitHubMentionTriggers() ([]string, error) {
@@ -680,7 +710,7 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) error {
 			logger := logger.With("url", *issue.HTMLURL)
 			logger.Debug("Fetching details for not-yet-known GitHub PR")
 			var codeReview *proto.CodeReview
-			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, gitHubMentionTriggers, logger)
+			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubMentionTriggers, logger)
 			if err != nil {
 				return errors.Wrap(err, "failed to fetch GitHub PR details for relist")
 			}
@@ -730,18 +760,18 @@ func (s *WorkboardServer) GetCodeReviews(ctx context.Context, query *proto.GetCo
 		return nil, err
 	}
 
+	gitHubUser, err := s.getGitHubUser()
+	if err != nil {
+		logger.Errorw("Failed to get GitHub user in order to calculate render-only fields", "err", err)
+		return nil, err
+	}
+
 	res := &proto.GetCodeReviewsResponse{}
 	for _, codeReview := range codeReviews {
+		s.fillConfigDependentRenderOnlyFields(codeReview, gitHubUser)
 		res.CodeReviews = append(res.CodeReviews, codeReview)
 	}
 	return res, nil
-}
-
-func (s *WorkboardServer) GetConfig(ctx context.Context, query *proto.GetConfigQuery) (*proto.Config, error) {
-	logger := s.logger
-	logger.Info("GetConfig")
-
-	return s.cfg, nil
 }
 
 func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId string) (*proto.CodeReview, error) {
@@ -779,7 +809,7 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 		return nil, errors.Wrap(err, "failed to get GitHub PR")
 	}
 
-	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubUser, gitHubMentionTriggers, logger)
+	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubMentionTriggers, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch GitHub PR details")
 	}
