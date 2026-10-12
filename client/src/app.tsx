@@ -1,3 +1,4 @@
+import './bootstrap.scss';
 import './app.css';
 import CodeReviewList from './CodeReviewList';
 
