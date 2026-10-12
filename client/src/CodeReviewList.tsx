@@ -35,11 +35,19 @@ import Spinner from './Spinner';
 import { RpcError } from 'grpc-web';
 import { grpcWebServerUrl } from './config';
 import ErrorBanner from './ErrorBanner';
+import CodeReviewDetailPane from './CodeReviewDetailPane';
+import {
+  canMarkReviewedDeleteOnMerge,
+  canSnoozeUntilTimeOrUpdate,
+  CodeReviewAvatar,
+  codeReviewSignals,
+  SignalIcon,
+  snoozeDurations,
+} from './codeReviewDisplay';
 
 const safeColor = new SafeColor({ color: [255, 255, 255], contrast: 3 });
 
-// Cache the color per id so a row's two uses (background and link) don't
-// recompute it
+// Cache the color per id so re-renders don't recompute it
 const safeColorCache = new Map<string, string>();
 function safeColorForId(id: string): string {
   let color = safeColorCache.get(id);
@@ -70,6 +78,8 @@ type CodeReviewListState = {
 
   hiddenCodeReviewGroups: Set<CodeReviewGroupType>;
 
+  selectedCodeReviewId?: string;
+
   // Don't forget to change `shouldComponentUpdate` when adding state fields!
 };
 
@@ -96,6 +106,21 @@ const codeReviewStatusToStringMap: {
   [CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE]:
     'updated-after-snooze',
 };
+
+function codeReviewStatusDescription(codeReview: CodeReview): string {
+  switch (codeReview.status) {
+    case CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED:
+      return `mentioned ${timeago.format(new Date(codeReview.lastMentionTimestamp * 1000), 'en')}`;
+    case CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED:
+      return 'snoozed until mentioned';
+    case CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME:
+      return `snoozed, back ${timeago.format(new Date(codeReview.snoozeUntilTimestamp * 1000), 'en')}`;
+    case CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE:
+      return `snoozed until update (last update was ${timeago.format(new Date(codeReview.snoozeUntilUpdatedAtChangedFrom * 1000), 'en')})`;
+    default:
+      return codeReviewStatusToString(codeReview.status).replace(/-/g, ' ');
+  }
+}
 
 function codeReviewStatusToString(status: CodeReviewStatus): string {
   const value = codeReviewStatusToStringMap[status];
@@ -124,6 +149,17 @@ function gitHubPullRequestStatusToString(
   }
   return value;
 }
+
+const snoozeUntilMentionedOptionValue = 'mentioned';
+const snoozeUntilUpdateOptionValue = 'update';
+
+// The row's group or GitHub state already conveys these
+const statusesWithoutDescriptionInRow = new Set([
+  CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED,
+  CodeReviewStatus.CODE_REVIEW_STATUS_MERGED,
+  CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW,
+  CodeReviewStatus.CODE_REVIEW_STATUS_NEW,
+]);
 
 const statusSortOrder: {
   [codeReviewStatus in CodeReviewStatus]: number;
@@ -334,10 +370,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       this.onIntervalBasedRefresh.bind(this),
       1000,
     );
+
+    document.addEventListener('keydown', this.onDocumentKeyDown);
   }
 
   componentWillUnmount() {
     this.mounted = false;
+
+    document.removeEventListener('keydown', this.onDocumentKeyDown);
 
     if (this.refreshIntervalCancel !== undefined) {
       clearInterval(this.refreshIntervalCancel);
@@ -366,6 +406,7 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         nextState.codeReviewGroups?.length ||
       this.state.searchEnabled != nextState.searchEnabled ||
       this.state.searchText != nextState.searchText ||
+      this.state.selectedCodeReviewId != nextState.selectedCodeReviewId ||
       this.state.hiddenCodeReviewGroups.size !=
         nextState.hiddenCodeReviewGroups.size
     ) {
@@ -439,6 +480,9 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         codeReview.githubFields?.url,
         codeReview.githubFields?.repo?.organizationName,
         codeReview.githubFields?.repo?.name,
+        codeReview.githubFields?.number,
+        codeReview.githubFields?.authorLogin,
+        codeReview.githubFields?.approvedByLogins?.join(','),
         codeReview.renderOnlyFields.approvedBySelf,
         codeReview.renderOnlyFields.approvedByOthers,
         codeReview.renderOnlyFields.authorName,
@@ -828,6 +872,22 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  onCloseDetailPane() {
+    this.setState({ selectedCodeReviewId: undefined });
+  }
+
+  onCodeReviewRowKeyDown(event: KeyboardEvent, codeReviewId: string) {
+    // Keys pressed on the row's links, buttons, and selects keep their meaning
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    if (event.key == 'Enter' || event.key == ' ') {
+      event.preventDefault();
+      this.onSelectCodeReview(codeReviewId);
+    }
+  }
+
   onDeleteReview(event: Event, codeReviewId: string) {
     event.preventDefault();
 
@@ -877,6 +937,26 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
+  onDocumentKeyDown = (event: KeyboardEvent) => {
+    if (
+      event.key != 'Escape' ||
+      this.state.selectedCodeReviewId === undefined
+    ) {
+      return;
+    }
+
+    // Escape in form fields keeps its meaning, e.g. clearing the search
+    if (
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement ||
+      event.target instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
+
+    this.onCloseDetailPane();
+  };
+
   onEnableSearch(event: Event) {
     event.preventDefault();
 
@@ -903,6 +983,10 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
         );
       },
     );
+  }
+
+  onOpenDetailPane(codeReviewId: string) {
+    this.setState({ selectedCodeReviewId: codeReviewId });
   }
 
   onRefresh(event: Event, codeReviewId: string) {
@@ -1002,6 +1086,38 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     }
   }
 
+  onSelectCodeReview(codeReviewId: string) {
+    this.setState((prevState) => ({
+      selectedCodeReviewId:
+        prevState.selectedCodeReviewId == codeReviewId
+          ? undefined
+          : codeReviewId,
+    }));
+  }
+
+  onSnoozeSelect(event: Event, codeReviewId: string) {
+    event.preventDefault();
+
+    const select = event.currentTarget as HTMLSelectElement;
+    const value = select.value;
+    select.selectedIndex = 0;
+
+    if (value == snoozeUntilMentionedOptionValue) {
+      this.onSnoozeUntilMentioned(event, codeReviewId);
+      return;
+    }
+    if (value == snoozeUntilUpdateOptionValue) {
+      this.onSnoozeUntilUpdate(event, codeReviewId);
+      return;
+    }
+
+    const secondsFromNow = parseInt(value, 10);
+    if (isNaN(secondsFromNow) || secondsFromNow <= 0) {
+      throw new Error('Failed to get snooze time from select element');
+    }
+    this.onSnoozeUntilTime(event, codeReviewId, secondsFromNow);
+  }
+
   onSnoozeUntilMentioned(event: Event, codeReviewId: string) {
     event.preventDefault();
     this.runCommandOnSingleCodeReview(
@@ -1017,19 +1133,12 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
   }
 
-  onSnoozeUntilTime(event: Event, codeReviewId: string) {
+  onSnoozeUntilTime(
+    event: Event,
+    codeReviewId: string,
+    secondsFromNow: number,
+  ) {
     event.preventDefault();
-
-    const select = event.currentTarget as HTMLSelectElement;
-    let secondsFromNow = 0;
-    for (const option of select.selectedOptions) {
-      secondsFromNow = parseInt(option.value, 10);
-      break;
-    }
-    if (secondsFromNow <= 0) {
-      throw new Error('Failed to get snooze time from select element');
-    }
-    select.selectedIndex = 0;
 
     this.runCommandOnSingleCodeReview(
       codeReviewId,
@@ -1257,12 +1366,17 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     let numIgnoredCodeReviews = 0;
     let numSnoozedCodeReviews = 0;
     let numDeletableCodeReviews = 0;
+    let selectedCodeReview: CodeReview | undefined;
     for (const codeReviewGroup of this.state.codeReviewGroups ?? []) {
       let haveCodeReviewsToRenderInThisGroup = false;
 
       for (const codeReview of codeReviewGroup.sortedCodeReviews) {
         if (codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_DELETED) {
           continue;
+        }
+        // Keep the detail pane open even if the search hides its row
+        if (codeReview.id == this.state.selectedCodeReviewId) {
+          selectedCodeReview = codeReview;
         }
         if (
           this.state.searchEnabled &&
@@ -1315,440 +1429,405 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
           />
         )}
 
-        <table className="pull-requests">
-          <thead>
-            <tr>
-              <th className="pull-requests-repo">Repo</th>
-              <th className="pull-requests-status">Your status</th>
-              <th className="pull-requests-github-status">GitHub state</th>
-              <th className="pull-requests-actions">
-                Actions
-                <div className="global-code-reviews-actions">
-                  <button onClick={(event) => this.onRelist(event)}>
-                    Refresh list
-                  </button>
-                  {numDeletableCodeReviews > 0 && (
-                    <button
-                      className="action-delete"
-                      onClick={(event) =>
-                        this.onDeleteCodeReviewsWherePossible(event)
-                      }
-                    >
-                      Delete {numDeletableCodeReviews}{' '}
-                      {simplePlural(numDeletableCodeReviews, 'code review')}
-                    </button>
-                  )}
-                  {!this.state.searchEnabled && (
-                    <button onClick={(event) => this.onEnableSearch(event)}>
-                      🔍
-                    </button>
-                  )}
-                  {this.state.searchEnabled && (
-                    <input
-                      type="text"
-                      id="search-text"
-                      className="search-text"
-                      value={this.state.searchText}
-                      // Filter code reviews list on every typed letter, no need
-                      // for the user to press Enter key
-                      onInput={(event) =>
-                        this.onSearchTextChange(event.currentTarget.value)
-                      }
-                      onKeyDown={(event) =>
-                        this.onSearchTextInputKeyDown(event)
-                      }
-                    />
-                  )}
-                  <span class="statistics">
-                    {numCodeReviews -
-                      numSnoozedCodeReviews -
-                      numIgnoredCodeReviews}{' '}
-                    {simplePlural(numCodeReviews, 'code review')} (
-                    {numSnoozedCodeReviews} snoozed, {numIgnoredCodeReviews}{' '}
-                    ignored, {numCodeReviews} total)
-                  </span>
-                  {this.state.codeReviewIdsWithActiveCommands.size > 0 && (
-                    <Spinner />
-                  )}
-                </div>
-              </th>
-              <th className="pull-requests-last-updated">Last updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {this.state.codeReviewsGrpcResult?.pending && <Spinner />}
-            {this.state.codeReviewsGrpcResult?.error && (
-              <tr>
-                <td colSpan={5}>
-                  <ErrorBanner
-                    error={`Failed to list code reviews: ${this.state.codeReviewsGrpcResult.error.message}`}
-                  />
-                </td>
-              </tr>
-            )}
-
-            {this.state.codeReviewsGrpcResult?.ok &&
-              codeReviewGroupsToRender.map((codeReviewGroup) => (
-                <Fragment key={codeReviewGroup.groupType}>
-                  <tr
-                    className={`code-review-group code-review-group-type-${codeReviewGroup.groupTypeStrWithoutOrderPrefix}`}
-                  >
-                    <td colSpan={5}>
-                      {
-                        codeReviewGroupTypeHeaderDescription[
-                          codeReviewGroup.groupType
-                        ]
-                      }
-                      <span
-                        title={`${codeReviewGroup.sortedCodeReviews.length} ${simplePlural(
-                          codeReviewGroup.sortedCodeReviews.length,
-                          'review',
-                        )}`}
-                      >
-                        {' '}
-                        ({codeReviewGroup.sortedCodeReviews.length})
+        <div className="code-review-layout">
+          <div className="code-review-list">
+            <table className="pull-requests">
+              <colgroup>
+                <col className="pull-requests-signal" />
+                <col className="pull-requests-signal" />
+                <col className="pull-requests-signal" />
+                <col className="pull-requests-signal" />
+                <col className="pull-requests-avatar" />
+                <col />
+                <col className="pull-requests-shortcuts" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="signal" title="Pipeline status">
+                    <i className="icon icon-check-double" />
+                  </th>
+                  <th className="signal" title="Approval">
+                    <i className="bi bi-hand-thumbs-up" />
+                  </th>
+                  <th className="signal" title="Draft">
+                    <i className="icon icon-memo-pencil" />
+                  </th>
+                  <th className="signal" title="Auto-merge">
+                    <i className="icon icon-code-merge" />
+                  </th>
+                  <th colSpan={3}>
+                    Pull request
+                    <div className="global-code-reviews-actions">
+                      <button onClick={(event) => this.onRelist(event)}>
+                        Refresh list
+                      </button>
+                      {numDeletableCodeReviews > 0 && (
+                        <button
+                          className="action-delete"
+                          onClick={(event) =>
+                            this.onDeleteCodeReviewsWherePossible(event)
+                          }
+                        >
+                          Delete {numDeletableCodeReviews}{' '}
+                          {simplePlural(numDeletableCodeReviews, 'code review')}
+                        </button>
+                      )}
+                      {!this.state.searchEnabled && (
+                        <button onClick={(event) => this.onEnableSearch(event)}>
+                          🔍
+                        </button>
+                      )}
+                      {this.state.searchEnabled && (
+                        <input
+                          type="text"
+                          id="search-text"
+                          className="search-text"
+                          value={this.state.searchText}
+                          // Filter code reviews list on every typed letter, no need
+                          // for the user to press Enter key
+                          onInput={(event) =>
+                            this.onSearchTextChange(event.currentTarget.value)
+                          }
+                          onKeyDown={(event) =>
+                            this.onSearchTextInputKeyDown(event)
+                          }
+                        />
+                      )}
+                      <span class="statistics">
+                        {numCodeReviews -
+                          numSnoozedCodeReviews -
+                          numIgnoredCodeReviews}{' '}
+                        {simplePlural(numCodeReviews, 'code review')} (
+                        {numSnoozedCodeReviews} snoozed, {numIgnoredCodeReviews}{' '}
+                        ignored, {numCodeReviews} total)
                       </span>
-                      <img
-                        className="code-review-group-collapse-expand"
-                        onClick={(event) =>
-                          this.onToggleCodeReviewGroup(
-                            event,
-                            codeReviewGroup.groupType,
-                          )
-                        }
-                        src={
-                          this.state.hiddenCodeReviewGroups.has(
-                            codeReviewGroup.groupType,
-                          )
-                            ? '/chevron-down.svg'
-                            : '/chevron-up.svg'
-                        }
-                        title="Collapse/expand"
+                      {this.state.codeReviewIdsWithActiveCommands.size > 0 && (
+                        <Spinner />
+                      )}
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {this.state.codeReviewsGrpcResult?.pending && <Spinner />}
+                {this.state.codeReviewsGrpcResult?.error && (
+                  <tr>
+                    <td colSpan={7}>
+                      <ErrorBanner
+                        error={`Failed to list code reviews: ${this.state.codeReviewsGrpcResult.error.message}`}
                       />
                     </td>
                   </tr>
-                  {!this.state.hiddenCodeReviewGroups.has(
-                    codeReviewGroup.groupType,
-                  ) &&
-                    codeReviewGroup.sortedCodeReviews.map((codeReview) => (
+                )}
+
+                {this.state.codeReviewsGrpcResult?.ok &&
+                  codeReviewGroupsToRender.map((codeReviewGroup) => (
+                    <Fragment key={codeReviewGroup.groupType}>
                       <tr
-                        key={codeReview.id}
-                        className={`status-${codeReviewStatusToString(codeReview.status)}${
-                          nowTimestamp - codeReview.lastVisitedTimestamp <= 3600
-                            ? nowTimestamp - codeReview.lastVisitedTimestamp <=
-                              900
-                              ? ' very-recently-visited'
-                              : ' recently-visited'
-                            : nowTimestamp - codeReview.lastChangedTimestamp <=
-                                3600
-                              ? nowTimestamp -
-                                  codeReview.lastChangedTimestamp <=
-                                900
-                                ? ' very-recently-changed'
-                                : ' recently-changed'
-                              : ''
-                        }`}
+                        className={`code-review-group code-review-group-type-${codeReviewGroup.groupTypeStrWithoutOrderPrefix}`}
                       >
-                        <td>
-                          <span className="repo-name">
-                            {codeReview.githubFields
-                              ? `${codeReview.githubFields.repo.organizationName}/${codeReview.githubFields.repo.name}`
-                              : null}
+                        <td colSpan={7}>
+                          {
+                            codeReviewGroupTypeHeaderDescription[
+                              codeReviewGroup.groupType
+                            ]
+                          }
+                          <span
+                            title={`${codeReviewGroup.sortedCodeReviews.length} ${simplePlural(
+                              codeReviewGroup.sortedCodeReviews.length,
+                              'review',
+                            )}`}
+                          >
+                            {' '}
+                            ({codeReviewGroup.sortedCodeReviews.length})
                           </span>
-                        </td>
-                        <td
-                          className={`status status-${codeReviewStatusToString(codeReview.status)}`}
-                        >
-                          {codeReview.status ==
-                            CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED && (
-                            <>
-                              Mentioned{' '}
-                              {timeago.format(
-                                new Date(
-                                  codeReview.lastMentionTimestamp * 1000,
-                                ),
-                                'en',
-                              )}
-                            </>
-                          )}
-
-                          {codeReview.status ==
-                            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME && (
-                            <>
-                              Snoozed until:{' '}
-                              {timeago.format(
-                                new Date(
-                                  codeReview.snoozeUntilTimestamp * 1000,
-                                ),
-                                'en',
-                              )}
-                            </>
-                          )}
-
-                          {codeReview.status ==
-                            CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
-                            <>
-                              Snoozed until update (last update was{' '}
-                              {timeago.format(
-                                new Date(
-                                  codeReview.snoozeUntilUpdatedAtChangedFrom *
-                                    1000,
-                                ),
-                                'en',
-                              )}
+                          <img
+                            className="code-review-group-collapse-expand"
+                            onClick={(event) =>
+                              this.onToggleCodeReviewGroup(
+                                event,
+                                codeReviewGroup.groupType,
                               )
-                            </>
-                          )}
-
-                          {codeReview.status !=
-                            CodeReviewStatus.CODE_REVIEW_STATUS_MENTIONED &&
-                            codeReview.status !=
-                              CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
-                            codeReview.status !=
-                              CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE &&
-                            codeReviewStatusToString(codeReview.status)}
-                        </td>
-                        <td className="github-status">
-                          {codeReview.githubFields
-                            ? gitHubPullRequestStatusToString(
-                                codeReview.githubFields.status,
+                            }
+                            src={
+                              this.state.hiddenCodeReviewGroups.has(
+                                codeReviewGroup.groupType,
                               )
-                            : ''}
-                        </td>
-                        <td
-                          style={`background-color: rgba${safeColorForId(codeReview.id).substring(3).replace(')', ', 0.1)')}`}
-                        >
-                          {codeReview.renderOnlyFields.avatarUrl.length > 0 && (
-                            <img
-                              className="code-review-avatar"
-                              src={codeReview.renderOnlyFields.avatarUrl}
-                              title={codeReview.renderOnlyFields.authorName}
-                            />
-                          )}
-
-                          {codeReview.githubFields?.statusCheckRollupStatus ==
-                            'SUCCESS' && (
-                            <img
-                              className="code-review-pipeline-status"
-                              src="/check-double.svg"
-                              title="Pipeline succeeded"
-                            />
-                          )}
-                          {codeReview.githubFields?.statusCheckRollupStatus ==
-                            'PENDING' && (
-                            <img
-                              className="code-review-pipeline-status"
-                              src="/hourglass.svg"
-                              title="Pipeline pending or on hold"
-                            />
-                          )}
-                          {codeReview.githubFields?.statusCheckRollupStatus ==
-                            'FAILURE' && (
-                            <img
-                              className="code-review-pipeline-status"
-                              src="/xmark.svg"
-                              title="Pipeline failed"
-                            />
-                          )}
-
-                          {codeReview.githubFields?.isDraft && (
-                            <img
-                              className="code-review-pipeline-status"
-                              src="/memo-pencil.svg"
-                              title="PR is a draft"
-                            />
-                          )}
-                          {codeReview.githubFields?.willAutoMerge && (
-                            <img
-                              className="code-review-pipeline-status"
-                              src="/code-merge.svg"
-                              title="PR has auto-merge enabled"
-                            />
-                          )}
-                          {codeReview.renderOnlyFields.approvedBySelf && (
-                            <i
-                              className="bi bi-hand-thumbs-up code-review-pipeline-status approved-by-self"
-                              title="Approved by you"
-                            />
-                          )}
-                          {!codeReview.renderOnlyFields.approvedBySelf &&
-                            codeReview.renderOnlyFields.approvedByOthers && (
-                              <i
-                                className="bi bi-hand-thumbs-up code-review-pipeline-status"
-                                title="Approved by others"
-                              />
-                            )}
-
-                          <a
-                            href={codeReview.githubFields?.url || ''}
-                            className="pr-link"
-                            target="_blank"
-                            rel="noopener"
-                            style={`color: ${safeColorForId(codeReview.id)}`}
-                            onClick={(_) => this.onVisitReview(codeReview.id)}
-                          >
-                            {codeReview.githubFields?.title || ''}
-                          </a>
-
-                          <div
-                            className={`actions ${this.state.codeReviewIdsWithActiveCommands.has(codeReview.id) ? 'actions-disabled' : ''}`}
-                          >
-                            {codeReview.status !=
-                              CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_TIME &&
-                              codeReview.status !=
-                                CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_UPDATE && (
-                                <>
-                                  <select
-                                    onChange={(event) =>
-                                      this.onSnoozeUntilTime(
-                                        event,
-                                        codeReview.id,
-                                      )
-                                    }
-                                    disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                      codeReview.id,
-                                    )}
-                                  >
-                                    <option value="">Snooze for…</option>
-                                    <option value="3600">1 hour</option>
-                                    <option value="86400">1 day</option>
-                                    <option value="259200">3 days</option>
-                                    <option value="604800">7 days</option>
-                                    <option value="1209600">14 days</option>
-                                  </select>
-                                  <button
-                                    onClick={(event) =>
-                                      this.onSnoozeUntilUpdate(
-                                        event,
-                                        codeReview.id,
-                                      )
-                                    }
-                                    disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                      codeReview.id,
-                                    )}
-                                  >
-                                    Snooze until update
-                                  </button>
-                                </>
-                              )}
-
-                            {codeReview.status !=
-                              CodeReviewStatus.CODE_REVIEW_STATUS_MUST_REVIEW && (
-                              <button
-                                onClick={(event) =>
-                                  this.onMarkMustReview(event, codeReview.id)
-                                }
-                                disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                  codeReview.id,
-                                )}
-                              >
-                                Mark 'must review'
-                              </button>
-                            )}
-
-                            {codeReview.githubFields?.status !=
-                              GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED &&
-                              codeReview.githubFields?.status !=
-                                GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED &&
-                              codeReview.status !=
-                                CodeReviewStatus.CODE_REVIEW_STATUS_MERGED &&
-                              codeReview.status !=
-                                CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED &&
-                              codeReview.status !=
-                                CodeReviewStatus.CODE_REVIEW_STATUS_ARCHIVED &&
-                              codeReview.status !=
-                                CodeReviewStatus.CODE_REVIEW_STATUS_REVIEWED_DELETE_ON_MERGE && (
-                                <button
-                                  className="action-reviewed-delete-on-merge"
-                                  onClick={(event) =>
-                                    this.onReviewedDeleteOnMerge(
-                                      event,
-                                      codeReview.id,
-                                    )
-                                  }
-                                  disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                    codeReview.id,
-                                  )}
-                                >
-                                  I reviewed or merged; delete once merged
-                                </button>
-                              )}
-
-                            {this.isDeletable(codeReview) && (
-                              <button
-                                className="action-delete"
-                                onClick={(event) =>
-                                  this.onDeleteReview(event, codeReview.id)
-                                }
-                                disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                  codeReview.id,
-                                )}
-                              >
-                                Delete
-                              </button>
-                            )}
-
-                            {!codeReview.renderOnlyFields.authorIsSelf && (
-                              <button
-                                onClick={(event) =>
-                                  this.onSnoozeUntilMentioned(
-                                    event,
-                                    codeReview.id,
-                                  )
-                                }
-                                disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                  codeReview.id,
-                                )}
-                              >
-                                Snooze until I'm mentioned
-                                <br />
-                                <small>(= someone else reviews)</small>
-                              </button>
-                            )}
-
-                            <button
-                              onClick={this.onSetManualWeight.bind(
-                                this,
-                                codeReview,
-                              )}
-                              disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                codeReview.id,
-                              )}
-                            >
-                              Set weight ({codeReview.renderOnlyFields.weight})
-                            </button>
-                            <button
-                              onClick={(event) =>
-                                this.onRefresh(event, codeReview.id)
-                              }
-                              disabled={this.state.codeReviewIdsWithActiveCommands.has(
-                                codeReview.id,
-                              )}
-                            >
-                              Refresh
-                            </button>
-
-                            {this.state.codeReviewIdsWithActiveCommands.has(
-                              codeReview.id,
-                            ) && <Spinner />}
-                          </div>
-                        </td>
-                        <td>
-                          {codeReview.lastUpdatedTimestamp > 0
-                            ? timeago.format(
-                                new Date(
-                                  codeReview.lastUpdatedTimestamp * 1000,
-                                ),
-                                'en',
-                              )
-                            : null}
+                                ? '/chevron-down.svg'
+                                : '/chevron-up.svg'
+                            }
+                            title="Collapse/expand"
+                          />
                         </td>
                       </tr>
-                    ))}
-                </Fragment>
-              ))}
-          </tbody>
-        </table>
+                      {!this.state.hiddenCodeReviewGroups.has(
+                        codeReviewGroup.groupType,
+                      ) &&
+                        codeReviewGroup.sortedCodeReviews.map((codeReview) => {
+                          const signals = codeReviewSignals(codeReview);
+                          const hasActiveCommand =
+                            this.state.codeReviewIdsWithActiveCommands.has(
+                              codeReview.id,
+                            );
+                          const canSnooze =
+                            canSnoozeUntilTimeOrUpdate(codeReview);
+                          const authorName =
+                            codeReview.renderOnlyFields.authorName ||
+                            codeReview.githubFields?.authorLogin ||
+                            '';
+
+                          return (
+                            <tr
+                              key={codeReview.id}
+                              className={`code-review status-${codeReviewStatusToString(codeReview.status)}${
+                                nowTimestamp -
+                                  codeReview.lastVisitedTimestamp <=
+                                3600
+                                  ? nowTimestamp -
+                                      codeReview.lastVisitedTimestamp <=
+                                    900
+                                    ? ' very-recently-visited'
+                                    : ' recently-visited'
+                                  : nowTimestamp -
+                                        codeReview.lastChangedTimestamp <=
+                                      3600
+                                    ? nowTimestamp -
+                                        codeReview.lastChangedTimestamp <=
+                                      900
+                                      ? ' very-recently-changed'
+                                      : ' recently-changed'
+                                    : ''
+                              }${codeReview.id == this.state.selectedCodeReviewId ? ' selected' : ''}`}
+                              tabIndex={0}
+                              onClick={() =>
+                                this.onSelectCodeReview(codeReview.id)
+                              }
+                              onKeyDown={(event) =>
+                                this.onCodeReviewRowKeyDown(
+                                  event,
+                                  codeReview.id,
+                                )
+                              }
+                            >
+                              <td
+                                className="signal"
+                                style={`box-shadow: inset 0.25em 0 0 ${safeColorForId(codeReview.id)}`}
+                              >
+                                {signals.pipeline && (
+                                  <SignalIcon signal={signals.pipeline} />
+                                )}
+                              </td>
+                              <td className="signal">
+                                {signals.approval && (
+                                  <SignalIcon signal={signals.approval} />
+                                )}
+                              </td>
+                              <td className="signal">
+                                {signals.draft && (
+                                  <SignalIcon signal={signals.draft} />
+                                )}
+                              </td>
+                              <td className="signal">
+                                {signals.autoMerge && (
+                                  <SignalIcon signal={signals.autoMerge} />
+                                )}
+                              </td>
+                              <td className="avatar">
+                                {hasActiveCommand ? (
+                                  // Keep the avatar's box size so the row doesn't shift
+                                  <span className="code-review-avatar code-review-avatar-placeholder">
+                                    <Spinner />
+                                  </span>
+                                ) : (
+                                  <CodeReviewAvatar codeReview={codeReview} />
+                                )}
+                              </td>
+                              <td className="code-review-summary">
+                                <div className="code-review-title">
+                                  <a
+                                    href={codeReview.githubFields?.url || ''}
+                                    className="pr-link"
+                                    target="_blank"
+                                    rel="noopener"
+                                    title={codeReview.githubFields?.title || ''}
+                                    onClick={(event) => {
+                                      // Open GitHub and show the detail pane without toggling it
+                                      event.stopPropagation();
+                                      this.onVisitReview(codeReview.id);
+                                      this.onOpenDetailPane(codeReview.id);
+                                    }}
+                                  >
+                                    {codeReview.githubFields?.title || ''}
+                                  </a>
+                                </div>
+                                <div className="code-review-meta">
+                                  {codeReview.githubFields && (
+                                    <>
+                                      <span className="repo-name">
+                                        {`${codeReview.githubFields.repo.organizationName}/${codeReview.githubFields.repo.name}`}
+                                      </span>{' '}
+                                      #{codeReview.githubFields.number}
+                                    </>
+                                  )}
+                                  {authorName.length > 0 && ` · ${authorName}`}
+                                  {codeReview.lastUpdatedTimestamp > 0 &&
+                                    ` · updated ${timeago.format(
+                                      new Date(
+                                        codeReview.lastUpdatedTimestamp * 1000,
+                                      ),
+                                      'en',
+                                    )}`}
+                                  {!statusesWithoutDescriptionInRow.has(
+                                    codeReview.status,
+                                  ) &&
+                                    ` · ${codeReviewStatusDescription(codeReview)}`}
+                                  {(codeReview.githubFields?.status ==
+                                    GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_MERGED ||
+                                    codeReview.githubFields?.status ==
+                                      GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_CLOSED) &&
+                                    ` · ${gitHubPullRequestStatusToString(codeReview.githubFields.status)} on GitHub`}
+                                </div>
+                              </td>
+                              <td
+                                className="code-review-shortcuts"
+                                // Keep the detail pane as it is while using the shortcuts
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <div
+                                  className={`actions ${hasActiveCommand ? 'actions-disabled' : ''}`}
+                                >
+                                  {(canSnooze ||
+                                    !codeReview.renderOnlyFields
+                                      .authorIsSelf) && (
+                                    <select
+                                      aria-label="Snooze"
+                                      onChange={(event) =>
+                                        this.onSnoozeSelect(
+                                          event,
+                                          codeReview.id,
+                                        )
+                                      }
+                                      disabled={hasActiveCommand}
+                                    >
+                                      <option value="">Snooze…</option>
+                                      {canSnooze &&
+                                        snoozeDurations.map(
+                                          (snoozeDuration) => (
+                                            <option
+                                              key={snoozeDuration.seconds}
+                                              value={snoozeDuration.seconds}
+                                            >
+                                              {snoozeDuration.label}
+                                            </option>
+                                          ),
+                                        )}
+                                      {canSnooze && (
+                                        <option
+                                          value={snoozeUntilUpdateOptionValue}
+                                        >
+                                          Until the PR is updated
+                                        </option>
+                                      )}
+                                      {!codeReview.renderOnlyFields
+                                        .authorIsSelf && (
+                                        <option
+                                          value={
+                                            snoozeUntilMentionedOptionValue
+                                          }
+                                        >
+                                          Until I'm mentioned (= someone else
+                                          reviews)
+                                        </option>
+                                      )}
+                                    </select>
+                                  )}
+                                  {canMarkReviewedDeleteOnMerge(codeReview) ? (
+                                    <button
+                                      className="action-reviewed-delete-on-merge"
+                                      title="I reviewed or merged; delete once merged"
+                                      onClick={(event) =>
+                                        this.onReviewedDeleteOnMerge(
+                                          event,
+                                          codeReview.id,
+                                        )
+                                      }
+                                      disabled={hasActiveCommand}
+                                    >
+                                      Reviewed
+                                    </button>
+                                  ) : (
+                                    this.isDeletable(codeReview) && (
+                                      <button
+                                        className="action-delete"
+                                        onClick={(event) =>
+                                          this.onDeleteReview(
+                                            event,
+                                            codeReview.id,
+                                          )
+                                        }
+                                        disabled={hasActiveCommand}
+                                      >
+                                        Delete
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </Fragment>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          {selectedCodeReview !== undefined && (
+            <CodeReviewDetailPane
+              codeReview={selectedCodeReview}
+              gitHubStatus={gitHubPullRequestStatusToString(
+                selectedCodeReview.githubFields?.status ??
+                  GitHubPullRequestStatus.GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED,
+              )}
+              hasActiveCommand={this.state.codeReviewIdsWithActiveCommands.has(
+                selectedCodeReview.id,
+              )}
+              isDeletable={this.isDeletable(selectedCodeReview)}
+              onClose={() => this.onCloseDetailPane()}
+              onDelete={(event) =>
+                this.onDeleteReview(event, selectedCodeReview.id)
+              }
+              onMarkMustReview={(event) =>
+                this.onMarkMustReview(event, selectedCodeReview.id)
+              }
+              onRefresh={(event) =>
+                this.onRefresh(event, selectedCodeReview.id)
+              }
+              onReviewedDeleteOnMerge={(event) =>
+                this.onReviewedDeleteOnMerge(event, selectedCodeReview.id)
+              }
+              onSetManualWeight={(event) =>
+                this.onSetManualWeight(selectedCodeReview, event)
+              }
+              onSnoozeUntilMentioned={(event) =>
+                this.onSnoozeUntilMentioned(event, selectedCodeReview.id)
+              }
+              onSnoozeUntilTime={(event, secondsFromNow) =>
+                this.onSnoozeUntilTime(
+                  event,
+                  selectedCodeReview.id,
+                  secondsFromNow,
+                )
+              }
+              onSnoozeUntilUpdate={(event) =>
+                this.onSnoozeUntilUpdate(event, selectedCodeReview.id)
+              }
+              onVisit={() => this.onVisitReview(selectedCodeReview.id)}
+              statusDescription={codeReviewStatusDescription(
+                selectedCodeReview,
+              )}
+            />
+          )}
+        </div>
       </>
     );
   }
