@@ -17,7 +17,7 @@ import {
   DeleteReviewCommand,
   MarkVisitedCommand,
   RelistReviewsCommand,
-  RefreshReviewsCommand,
+  RefreshChangedReviewsCommand,
   SetCodeReviewManualWeightCommand,
 } from './generated/workboard';
 import {
@@ -48,6 +48,9 @@ import {
   snoozeDurations,
 } from './codeReviewDisplay';
 import DeleteCodeReviewsDialog from './DeleteCodeReviewsDialog';
+
+// GitHub's usual notifications poll interval, so polling more often wouldn't find new pull requests faster
+const changedReviewsRefreshIntervalSeconds = 60;
 
 const safeColor = new SafeColor({ color: [255, 255, 255], contrast: 3 });
 
@@ -248,10 +251,8 @@ function sortCodeReviews(res: GetCodeReviewsResponse): CodeReviewGroup[] {
 
 export default class CodeReviewList extends Component<{}, CodeReviewListState> {
   lastAutoRelistTimestamp: number;
-  lastAutoRefreshTimestamp: number;
-  lastAutoRefreshErrorTimestamp: number;
-  localLastRefreshedTimestampMap: Map<string, number>;
-  numRunningAutoRefreshRequests: number;
+  lastChangedReviewsRefreshTimestamp: number;
+  changedReviewsRefreshRunning: boolean;
   refreshIntervalCancel?: NodeJS.Timeout;
 
   // Monotonic counter identifying the latest GetCodeReviews request. Responses
@@ -267,10 +268,8 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     super(props);
 
     this.lastAutoRelistTimestamp = 0;
-    this.lastAutoRefreshTimestamp = 0;
-    this.lastAutoRefreshErrorTimestamp = 0;
-    this.localLastRefreshedTimestampMap = new Map();
-    this.numRunningAutoRefreshRequests = 0;
+    this.lastChangedReviewsRefreshTimestamp = 0;
+    this.changedReviewsRefreshRunning = false;
     this.getCodeReviewsSeq = 0;
     this.mounted = false;
     this.state = {
@@ -297,12 +296,14 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     );
 
     document.addEventListener('keydown', this.onDocumentKeyDown);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
   }
 
   componentWillUnmount() {
     this.mounted = false;
 
     document.removeEventListener('keydown', this.onDocumentKeyDown);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
 
     if (this.refreshIntervalCancel !== undefined) {
       clearInterval(this.refreshIntervalCancel);
@@ -444,67 +445,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
     return false;
   }
 
-  // Calculate how often and how many code reviews at once should be auto-refreshed. For a larger
-  // number of code reviews with outdated information, the refresh should happen quickly. That happens
-  // for example when opening workboard the first time in the morning of a working day.
-  getAutoRefreshIntervalAndBatchSizeForAllCodeReviews(
-    numCodeReviewsNeedingRefresh: number,
-    nowTimestamp: number,
-  ): {
-    autoRefreshIntervalSeconds: number;
-    numCodeReviewsToRefresh: number;
-  } {
-    const autoRefreshIntervalSeconds =
-      // No clock drift?
-      nowTimestamp - this.lastAutoRefreshErrorTimestamp >= -10 &&
-      // Back off in case of errors (e.g. GitHub API rate limit)
-      nowTimestamp - this.lastAutoRefreshErrorTimestamp < 60
-        ? 15
-        : numCodeReviewsNeedingRefresh > 50
-          ? 2
-          : 5;
-    const numCodeReviewsToRefresh = Math.min(
-      numCodeReviewsNeedingRefresh,
-      Math.max(10, Math.min(20, Math.floor(numCodeReviewsNeedingRefresh / 3))),
-    );
-
-    return { autoRefreshIntervalSeconds, numCodeReviewsToRefresh };
-  }
-
-  // Calculate how often a code review should be refresh. Active PRs (= recently updated) should be updated more often.
-  getAutoRefreshIntervalForSingleCodeReview(
-    codeReview: CodeReview,
-    nowTimestamp: number,
-  ): number {
-    const lastUpdatedAgeSeconds =
-      nowTimestamp - codeReview.lastUpdatedTimestamp;
-
-    const userDislikesReview =
-      codeReview.status ==
-      CodeReviewStatus.CODE_REVIEW_STATUS_SNOOZED_UNTIL_MENTIONED;
-
-    if (lastUpdatedAgeSeconds < -10) {
-      // Large difference of clocks, treat like an old code review
-      return 3600;
-    } else if (lastUpdatedAgeSeconds < 300 && !userDislikesReview) {
-      // Very, very recently active
-      return 60;
-    } else if (lastUpdatedAgeSeconds < 3600 && !userDislikesReview) {
-      // Very recently active
-      return 300;
-    } else if (lastUpdatedAgeSeconds < 86400) {
-      // Somewhat recently active
-      return 900;
-    } else if (lastUpdatedAgeSeconds < 14 * 86400) {
-      return 7200;
-    } else if (lastUpdatedAgeSeconds < 60 * 86400) {
-      return 14400;
-    } else {
-      // Dying in a dusty corner
-      return 86400;
-    }
-  }
-
   isDeletable(codeReview: CodeReview): boolean {
     return (
       codeReview.status == CodeReviewStatus.CODE_REVIEW_STATUS_CLOSED ||
@@ -533,126 +473,52 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
       return;
     }
 
-    // We keep a local map of when the last auto-refresh was tried for each code review. That's because the
-    // stored state may not keep up with `onIntervalBasedRefresh` being called every second, and we don't want
-    // to auto-refresh one code review multiple times just because its `lastRefreshedTimestamp` wasn't re-fetched
-    // in the last few seconds.
-    for (const [codeReviewId, localLastRefreshedTimestamp] of this
-      .localLastRefreshedTimestampMap) {
-      // We auto-refresh at most every 60 seconds (see `getAutoRefreshIntervalForSingleCodeReview`), so keep
-      // the cache roughly until that time.
-      if (nowTimestamp - localLastRefreshedTimestamp > 55) {
-        this.localLastRefreshedTimestampMap.delete(codeReviewId);
-      }
-    }
-
-    const codeReviewsNeedingRefresh =
-      this.state.codeReviewGroups
-        ?.map((codeReviewGroup) =>
-          codeReviewGroup.sortedCodeReviews.filter((codeReview) => {
-            return (
-              nowTimestamp -
-                (this.localLastRefreshedTimestampMap.get(codeReview.id) ?? 0) >
-                55 &&
-              codeReview.status !=
-                CodeReviewStatus.CODE_REVIEW_STATUS_DELETED &&
-              nowTimestamp - codeReview.lastRefreshedTimestamp >=
-                this.getAutoRefreshIntervalForSingleCodeReview(
-                  codeReview,
-                  nowTimestamp,
-                )
-            );
-          }),
-        )
-        .flat(1) ?? [];
-
-    if (codeReviewsNeedingRefresh.length === 0) {
-      console.debug('No code reviews need a refresh');
-      return;
-    }
-
-    const settings = this.getAutoRefreshIntervalAndBatchSizeForAllCodeReviews(
-      codeReviewsNeedingRefresh.length,
-      nowTimestamp,
-    );
-
+    const secondsSinceLastChangedReviewsRefresh =
+      nowTimestamp - this.lastChangedReviewsRefreshTimestamp;
     if (
-      // No clock drift
-      nowTimestamp > this.lastAutoRefreshTimestamp &&
-      // Not time yet to auto-refresh
-      nowTimestamp - this.lastAutoRefreshTimestamp <
-        settings.autoRefreshIntervalSeconds
+      this.changedReviewsRefreshRunning ||
+      // Negative in case of clock drift
+      (secondsSinceLastChangedReviewsRefresh >= 0 &&
+        secondsSinceLastChangedReviewsRefresh <
+          changedReviewsRefreshIntervalSeconds)
     ) {
       return;
     }
-    this.lastAutoRefreshTimestamp = nowTimestamp;
-    console.info(
-      `Auto-refresh with autoRefreshIntervalSeconds=${settings.autoRefreshIntervalSeconds} ` +
-        `numCodeReviewsToRefresh=${settings.numCodeReviewsToRefresh} ` +
-        `codeReviewsNeedingRefresh.length=${codeReviewsNeedingRefresh.length} ` +
-        `this.numRunningAutoRefreshRequests=${this.numRunningAutoRefreshRequests}`,
-    );
+    this.lastChangedReviewsRefreshTimestamp = nowTimestamp;
+    this.changedReviewsRefreshRunning = true;
 
-    const codeReviewIdsToRefresh = new Set<string>();
-
-    for (let i = 0; i < settings.numCodeReviewsToRefresh; ++i) {
-      for (let j = 0; j < 10; ++j) {
-        // Give higher chances to top displayed code reviews
-        const randomCodeReview = codeReviewsNeedingRefresh.at(
-          codeReviewsNeedingRefresh.length * Math.pow(Math.random(), 1.2),
-        );
-        if (randomCodeReview === undefined) {
-          break;
+    const client = new WorkboardClient(grpcWebServerUrl);
+    client.RefreshChangedReviews(
+      new RefreshChangedReviewsCommand(),
+      grpcDeadline(grpcBatchTimeoutMs),
+      (error, res) => {
+        this.changedReviewsRefreshRunning = false;
+        if (!this.mounted) {
+          return;
         }
 
-        if (codeReviewIdsToRefresh.has(randomCodeReview.id)) {
-          continue;
+        const commandResult = toGrpcResult(error, res);
+        if (!commandResult.ok) {
+          console.error(
+            `Command failed (RefreshChangedReviews): ${commandResult.error}`,
+          );
+          return;
         }
-        codeReviewIdsToRefresh.add(randomCodeReview.id);
-        break;
-      }
-    }
 
-    ++this.numRunningAutoRefreshRequests;
-    if (this.numRunningAutoRefreshRequests > 2) {
-      console.debug('Too many concurrent RPC requests, skipping auto-refresh');
-      --this.numRunningAutoRefreshRequests;
-      return;
-    }
-
-    for (const codeReviewIdToRefresh of codeReviewIdsToRefresh) {
-      this.localLastRefreshedTimestampMap.set(
-        codeReviewIdToRefresh,
-        nowTimestamp,
-      );
-    }
-    console.debug(
-      `Refreshing ${codeReviewIdsToRefresh.size} code reviews: ${JSON.stringify([...codeReviewIdsToRefresh])}`,
-    );
-
-    this.runCommandOnManyCodeReviews(
-      [...codeReviewIdsToRefresh],
-      'refresh',
-      (codeReviewIds, client, onResult) => {
-        client.RefreshReviews(
-          new RefreshReviewsCommand({
-            codeReviewIds,
-          }),
-          grpcDeadline(grpcBatchTimeoutMs),
-          (error, res) => {
-            --this.numRunningAutoRefreshRequests;
-
-            const commandResult = toGrpcResult(error, res);
-            if (!commandResult.ok) {
-              this.lastAutoRefreshErrorTimestamp = Date.now() / 1000;
-            }
-
-            onResult(error, res);
-          },
-        );
+        const changedCodeReviewIds = commandResult.res.changedCodeReviewIds;
+        if (changedCodeReviewIds.length > 0) {
+          console.debug(
+            `Refreshed ${changedCodeReviewIds.length} changed code reviews: ${JSON.stringify(changedCodeReviewIds)}`,
+          );
+          this.refresh();
+        }
       },
     );
   }
+
+  onVisibilityChange = () => {
+    this.onIntervalBasedRefresh();
+  };
 
   runCommandOnEachCodeReview(
     codeReviewIds: Array<string>,
@@ -707,51 +573,6 @@ export default class CodeReviewList extends Component<{}, CodeReviewListState> {
             }
           });
         }
-      },
-    );
-  }
-
-  // Unlike the other `runCommand...` helpers, this one serves background
-  // auto-refresh, so timeouts are only logged instead of interrupting the user
-  runCommandOnManyCodeReviews(
-    codeReviewIds: Array<string>,
-    commandDesc: string,
-    runCommand: (
-      codeReviewIds: Array<string>,
-      client: WorkboardClient,
-      onResult: (error: RpcError, res: CommandResponse) => void,
-    ) => void,
-  ) {
-    const thiz = this;
-    this.setState(
-      (prevState) => ({
-        codeReviewIdsWithActiveCommands: new Set([
-          ...prevState.codeReviewIdsWithActiveCommands,
-          ...codeReviewIds,
-        ]),
-      }),
-      () => {
-        let client = new WorkboardClient(grpcWebServerUrl);
-
-        runCommand(codeReviewIds, client, (error, res) => {
-          if (!this.mounted) {
-            return;
-          }
-
-          const commandResult = toGrpcResult(error, res);
-          if (!commandResult.ok) {
-            console.error(
-              `Command failed (${commandDesc}): ${commandResult.error}`,
-            );
-
-            // Continue to refresh since that will remove the code reviews from `codeReviewIdsWithActiveCommands`
-            // and after an error, it's probably a good idea to get the latest data.
-          }
-
-          thiz.refresh({
-            removeCodeReviewIdsWithActiveCommands: codeReviewIds,
-          });
-        });
       },
     );
   }

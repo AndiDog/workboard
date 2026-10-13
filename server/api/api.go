@@ -22,6 +22,10 @@ import (
 
 const deleteAfterNowSeconds = 86400 * 30
 
+const gitHubIssueStateClosed = "closed"
+
+const gitHubIssueStateOpen = "open"
+
 type WorkboardServer struct {
 	proto.UnimplementedWorkboardServer
 
@@ -33,6 +37,14 @@ type WorkboardServer struct {
 
 	gitHubClient        *github.Client
 	gitHubGraphQLClient *githubv4.Client
+
+	// Guards the fields below, which throttle `RefreshChangedReviews` calls (e.g. from multiple browser tabs)
+	changedReviewsPollMutex             sync.Mutex
+	gitHubGraphQLRateLimit              gitHubGraphQLRateLimit
+	gitHubGraphQLRateLimitWarnedResetAt time.Time
+	lastChangedReviewsPollCost          int
+	lastChangedReviewsPollTime          time.Time
+	nextGitHubNotificationsPollTime     time.Time
 }
 
 func NewWorkboardServer(cfg *proto.Config, db *database.Database, logger *zap.SugaredLogger) (*WorkboardServer, error) {
@@ -64,12 +76,12 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 
 	gitHubPullRequestStatus := proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_UNSPECIFIED
 	switch *issue.State {
-	case "open":
+	case gitHubIssueStateOpen:
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_OPEN
-	case "closed":
+	case gitHubIssueStateClosed:
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_CLOSED
 	}
-	if issue.PullRequestLinks.MergedAt != nil && *issue.State == "closed" {
+	if issue.PullRequestLinks.MergedAt != nil && *issue.State == gitHubIssueStateClosed {
 		gitHubPullRequestStatus = proto.GitHubPullRequestStatus_GITHUB_PULL_REQUEST_STATUS_MERGED
 	}
 
@@ -83,10 +95,7 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 
 	repoIsArchived := extraInfo.Repository.ArchivedAt != nil && !extraInfo.Repository.ArchivedAt.IsZero()
 
-	statusCheckRollupQueryState := ""
-	if len(extraInfo.Repository.PullRequest.Commits.Nodes) > 0 {
-		statusCheckRollupQueryState = extraInfo.Repository.PullRequest.Commits.Nodes[0].Commit.StatusCheckRollup.State
-	}
+	statusCheckRollupQueryState := extraInfo.Repository.PullRequest.Commits.statusCheckRollupState()
 
 	authorLogin := ""
 	if issue.User != nil && issue.User.Login != nil {
@@ -151,6 +160,8 @@ func convertGitHubToWorkboardCodeReview(issue *github.Issue, owner string, repo 
 			WillAutoMerge:           extraInfo.Repository.PullRequest.AutoMergeRequest.EnabledAt != nil,
 			AuthorLogin:             authorLogin,
 			ApprovedByLogins:        approvedByLogins,
+			NodeId:                  extraInfo.Repository.PullRequest.Id,
+			Fingerprint:             extraInfo.Repository.PullRequest.fingerprint(),
 		},
 
 		// Only the fields which don't depend on configuration are stored. The rest is filled by
@@ -354,6 +365,30 @@ func conditionalUserAvatarUrl(extraInfo *ExtraInfoGraphQLQuery, logger *zap.Suga
 	return avatarUrl
 }
 
+// convertAndStoreCodeReview merges fetched GitHub data into the stored code review. Converting under the lock keeps
+// user actions (e.g. snoozing) which happened while fetching.
+func (s *WorkboardServer) convertAndStoreCodeReview(issue *github.Issue, extraInfo *ExtraInfoGraphQLQuery, gitHubMentionTriggers []string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+	owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	s.dbMutex.Lock()
+	defer s.dbMutex.Unlock()
+
+	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, s.getCodeReviewById, gitHubMentionTriggers, *extraInfo, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.storeCodeReview(codeReview)
+	if err != nil {
+		return nil, err
+	}
+
+	return codeReview, nil
+}
+
 func (s *WorkboardServer) DeleteReview(ctx context.Context, cmd *proto.DeleteReviewCommand) (*proto.CommandResponse, error) {
 	logger := s.logger
 	logger.Info("DeleteReview")
@@ -423,51 +458,80 @@ type ExtraInfoGraphQLQuery struct {
 	Repository struct {
 		ArchivedAt *githubv4.DateTime
 
-		// https://docs.github.com/en/graphql/reference/objects#pullrequest
-		PullRequest struct {
-			// https://docs.github.com/en/graphql/reference/interfaces#actor
-			Author struct {
-				AvatarUrl *githubv4.URI
-				Login     string
-			}
-
-			AutoMergeRequest struct {
-				EnabledAt *githubv4.DateTime
-			}
-
-			Comments struct {
-				Nodes []struct {
-					CreatedAt *githubv4.DateTime
-					UpdatedAt *githubv4.DateTime
-					Body      string
-				}
-			} `graphql:"comments(last: 20)"`
-
-			Commits struct {
-				Nodes []struct {
-					Commit struct {
-						StatusCheckRollup struct {
-							State string
-						}
-					}
-				}
-			} `graphql:"commits(last: 1)"`
-
-			IsDraft bool
-
-			Reviews struct {
-				Nodes []struct {
-					Author struct {
-						Login string
-					}
-					State string
-				}
-			} `graphql:"reviews(first: 100)"`
-		} `graphql:"pullRequest(number: $number)"`
+		PullRequest GitHubPullRequestGraphQLFields `graphql:"pullRequest(number: $number)"`
 	} `graphql:"repository(owner: $owner, name: $name)"`
 }
 
-func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, getCodeReviewById func(codeReviewId string) (*proto.CodeReview, error), gitHubMentionTriggers []string, logger *zap.SugaredLogger) (*proto.CodeReview, error) {
+// GitHubLastCommitGraphQLFields must be queried as `commits(last: 1)`
+type GitHubLastCommitGraphQLFields struct {
+	Nodes []struct {
+		Commit struct {
+			StatusCheckRollup struct {
+				State string
+			}
+		}
+	}
+}
+
+func (lastCommit *GitHubLastCommitGraphQLFields) statusCheckRollupState() string {
+	if len(lastCommit.Nodes) == 0 {
+		return ""
+	}
+	return lastCommit.Nodes[0].Commit.StatusCheckRollup.State
+}
+
+// https://docs.github.com/en/graphql/reference/objects#pullrequest
+type GitHubPullRequestGraphQLFields struct {
+	// https://docs.github.com/en/graphql/reference/interfaces#actor
+	Author struct {
+		AvatarUrl *githubv4.URI
+		Login     string
+	}
+
+	AutoMergeRequest struct {
+		EnabledAt *githubv4.DateTime
+	}
+
+	Comments struct {
+		Nodes []struct {
+			CreatedAt *githubv4.DateTime
+			UpdatedAt *githubv4.DateTime
+			Body      string
+		}
+	} `graphql:"comments(last: 20)"`
+
+	Commits GitHubLastCommitGraphQLFields `graphql:"commits(last: 1)"`
+
+	HeadRefOid string
+	Id         string
+	IsDraft    bool
+	MergedAt   *githubv4.DateTime
+	Number     int
+
+	Repository struct {
+		ArchivedAt *githubv4.DateTime
+	}
+
+	Reviews struct {
+		Nodes []struct {
+			Author struct {
+				Login string
+			}
+			State string
+		}
+	} `graphql:"reviews(first: 100)"`
+
+	State     string
+	Title     string
+	UpdatedAt githubv4.DateTime
+	Url       string
+}
+
+func (pullRequest *GitHubPullRequestGraphQLFields) fingerprint() string {
+	return gitHubPullRequestFingerprint(pullRequest.UpdatedAt, pullRequest.State, pullRequest.HeadRefOid, pullRequest.Commits.statusCheckRollupState())
+}
+
+func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, issue *github.Issue, logger *zap.SugaredLogger) (*ExtraInfoGraphQLQuery, error) {
 	owner, repo, err := getOwnerAndRepoFromGitHubIssue(issue, logger)
 	if err != nil {
 		return nil, err
@@ -501,11 +565,7 @@ func (s *WorkboardServer) fetchGitHubPullRequestDetails(ctx context.Context, iss
 		logger.Warnw("Failed to delete obsolete avatar URL from database", "err", err)
 	}
 
-	codeReview, err := convertGitHubToWorkboardCodeReview(issue, owner, repo, getCodeReviewById, gitHubMentionTriggers, extraInfo, logger)
-	if err != nil {
-		return nil, err
-	}
-	return codeReview, nil
+	return &extraInfo, nil
 }
 
 // fillConfigDependentRenderOnlyFields calculates those `render_only_fields` which depend on configuration and
@@ -709,18 +769,15 @@ func (s *WorkboardServer) relistCodeReviews(ctx context.Context) error {
 
 			logger := logger.With("url", *issue.HTMLURL)
 			logger.Debug("Fetching details for not-yet-known GitHub PR")
-			var codeReview *proto.CodeReview
-			codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubMentionTriggers, logger)
+			var extraInfo *ExtraInfoGraphQLQuery
+			extraInfo, err = s.fetchGitHubPullRequestDetails(ctx, issue, logger)
 			if err != nil {
 				return errors.Wrap(err, "failed to fetch GitHub PR details for relist")
 			}
 			logger.Debug("Fetched details for not-yet-known GitHub PR")
 
 			logger.Debug("Storing code review")
-			s.dbMutex.Lock()
-			err = s.storeCodeReview(codeReview)
-			s.dbMutex.Unlock()
-
+			_, err = s.convertAndStoreCodeReview(issue, extraInfo, gitHubMentionTriggers, logger)
 			if err != nil {
 				return errors.Wrap(err, "failed to store GitHub PR details from relist")
 			}
@@ -809,21 +866,14 @@ func (s *WorkboardServer) refreshCodeReview(ctx context.Context, codeReviewId st
 		return nil, errors.Wrap(err, "failed to get GitHub PR")
 	}
 
-	codeReview, err = s.fetchGitHubPullRequestDetails(ctx, issue, s.getCodeReviewById, gitHubMentionTriggers, logger)
+	extraInfo, err := s.fetchGitHubPullRequestDetails(ctx, issue, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch GitHub PR details")
 	}
 	logger.Debug("Queried details for GitHub PR")
 
-	s.dbMutex.Lock()
-	defer s.dbMutex.Unlock()
-
 	logger.Debug("Storing details for GitHub PR")
-	if err := s.storeCodeReview(codeReview); err != nil {
-		return nil, err
-	}
-
-	return codeReview, nil
+	return s.convertAndStoreCodeReview(issue, extraInfo, gitHubMentionTriggers, logger)
 }
 
 func (s *WorkboardServer) MarkMustReview(ctx context.Context, cmd *proto.MarkMustReviewCommand) (*proto.CommandResponse, error) {
@@ -913,6 +963,33 @@ func (s *WorkboardServer) RelistReviews(ctx context.Context, query *proto.Relist
 	return &proto.CommandResponse{}, nil
 }
 
+func (s *WorkboardServer) RefreshChangedReviews(ctx context.Context, cmd *proto.RefreshChangedReviewsCommand) (*proto.RefreshChangedReviewsResponse, error) {
+	logger := s.logger
+	logger.Info("RefreshChangedReviews")
+
+	if !s.changedReviewsPollMutex.TryLock() {
+		logger.Debug("Skipping since another poll for changed code reviews is running")
+		return &proto.RefreshChangedReviewsResponse{}, nil
+	}
+	defer s.changedReviewsPollMutex.Unlock()
+
+	now := time.Now()
+	minPollInterval := s.changedReviewsMinPollInterval(now)
+	if now.Sub(s.lastChangedReviewsPollTime) < minPollInterval {
+		logger.Debugw("Skipping since code reviews were polled for changes recently", "minPollInterval", minPollInterval)
+		return &proto.RefreshChangedReviewsResponse{}, nil
+	}
+	s.lastChangedReviewsPollTime = now
+
+	changedCodeReviewIds, err := s.refreshChangedCodeReviews(ctx, logger)
+	if err != nil {
+		logger.Errorw("Failed to refresh changed code reviews", "err", err)
+		return nil, err
+	}
+
+	return &proto.RefreshChangedReviewsResponse{ChangedCodeReviewIds: changedCodeReviewIds}, nil
+}
+
 func (s *WorkboardServer) RefreshReview(ctx context.Context, cmd *proto.RefreshReviewCommand) (*proto.CommandResponse, error) {
 	logger := s.logger.With("codeReviewId", cmd.CodeReviewId)
 	logger.Info("RefreshReview")
@@ -920,28 +997,6 @@ func (s *WorkboardServer) RefreshReview(ctx context.Context, cmd *proto.RefreshR
 	_, err := s.refreshCodeReview(ctx, cmd.CodeReviewId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to refresh code review")
-	}
-
-	return &proto.CommandResponse{}, nil
-}
-
-func (s *WorkboardServer) RefreshReviews(ctx context.Context, cmd *proto.RefreshReviewsCommand) (*proto.CommandResponse, error) {
-	logger := s.logger.With("codeReviewIds", cmd.CodeReviewIds)
-	logger.Info("RefreshReviews")
-
-	if len(cmd.CodeReviewIds) <= 0 {
-		return nil, errors.New("RefreshReviewsCommand.code_review_ids must not be empty")
-	}
-	const maxNumReviews = 20
-	if len(cmd.CodeReviewIds) > maxNumReviews {
-		return nil, errors.Errorf("RefreshReviewsCommand.code_review_ids only allows %d reviews at once", maxNumReviews)
-	}
-
-	for _, codeReviewId := range cmd.CodeReviewIds {
-		_, err := s.refreshCodeReview(ctx, codeReviewId)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to refresh code review")
-		}
 	}
 
 	return &proto.CommandResponse{}, nil

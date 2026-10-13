@@ -36,7 +36,7 @@ The application runs locally. Use the "Running" instructions above. That's it â€
 
 To add a GitHub PR manually, assign yourself to it. The "Assigned PRs" listing output is cached, so it may take a while for _workboard_ to list it.
 
-The expected way of using the tool is to pin it as browser tab and regularly visit it. It will automatically refresh the list and each code review's state while you're actively looking at the web application (browser tab is active). You can go through the list one-by-one and perform the needed actions, for example "I reviewed or merged; delete once merged" after you submitted the review, so that the workboard entry gets unlisted automatically if the PR really gets merged, or comes back to the top of the list if it surprisingly doesn't get merged soon. The last-clicked PR is highlighted so you know where you previously left the browser tab. Please left-click the PR links in the table to make this feature work.
+The expected way of using the tool is to pin it as browser tab and regularly visit it. It will automatically refresh the list and each code review's state while you're actively looking at the web application (browser tab is active). About once per minute, the server cheaply checks all code reviews for changes on GitHub (including CI status) and only fetches details for the changed ones. New PRs which request your review or mention you are found through your GitHub notifications. You can go through the list one-by-one and perform the needed actions, for example "I reviewed or merged; delete once merged" after you submitted the review, so that the workboard entry gets unlisted automatically if the PR really gets merged, or comes back to the top of the list if it surprisingly doesn't get merged soon. The last-clicked PR is highlighted so you know where you previously left the browser tab. Please left-click the PR links in the table to make this feature work.
 
 ### Search
 
@@ -50,7 +50,7 @@ That said, [I](https://github.com/AndiDog) am making this application **open sou
 
 ## Possible future features / known problems
 
-- Search currently doesn't include GitHub teams of which you are a member, so PRs requesting review from those teams unfortunately aren't listed
+- Search currently doesn't include GitHub teams of which you are a member. PRs requesting review from those teams are only listed through your GitHub notifications.
 - GitHub issues
 - GitLab (issues and MRs)
 

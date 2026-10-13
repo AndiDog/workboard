@@ -128,6 +128,13 @@ message GitHubPullRequestFields {
   // stored so that the configuration-dependent `approved_by_self` and
   // `approved_by_others` can be calculated on each read.
   repeated string approved_by_logins = 11;
+
+  // GraphQL node ID, used to query many pull requests at once
+  string node_id = 12;
+
+  // Cheaply queryable state used to detect changes without fetching all
+  // details
+  string fingerprint = 13;
 }
 
 message GitHubRepo {
@@ -182,12 +189,14 @@ message MarkVisitedCommand {
   string code_review_id = 1;
 }
 
-message RefreshReviewCommand {
-  string code_review_id = 1;
+message RefreshChangedReviewsCommand {}
+
+message RefreshChangedReviewsResponse {
+  repeated string changed_code_review_ids = 1;
 }
 
-message RefreshReviewsCommand {
-  repeated string code_review_ids = 1;
+message RefreshReviewCommand {
+  string code_review_id = 1;
 }
 
 message RelistReviewsCommand {}
@@ -231,11 +240,13 @@ service Workboard {
   // database, but loads details for any not-yet-known reviews.
   rpc RelistReviews(RelistReviewsCommand) returns (CommandResponse) {}
 
+  // Detect which code reviews changed on the providers (e.g. GitHub) and
+  // refresh only those
+  rpc RefreshChangedReviews(RefreshChangedReviewsCommand)
+      returns (RefreshChangedReviewsResponse) {}
+
   // Refresh single code review
   rpc RefreshReview(RefreshReviewCommand) returns (CommandResponse) {}
-
-  // Refresh many code reviews at once
-  rpc RefreshReviews(RefreshReviewsCommand) returns (CommandResponse) {}
 
   rpc ReviewedDeleteOnMerge(ReviewedDeleteOnMergeCommand)
       returns (CommandResponse) {}
