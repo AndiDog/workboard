@@ -11,6 +11,7 @@ import {
   CodeReviewAvatar,
   codeReviewSignals,
   codeReviewStatusTone,
+  recentUpdateBadgeClassName,
   SignalBadge,
   snoozeDurations,
 } from './codeReviewDisplay';
@@ -34,10 +35,14 @@ type CodeReviewDetailPaneProps = {
   statusDescription: string;
 };
 
-function RelativeTime(props: { timestamp: number }) {
+function RelativeTime(props: { className?: string; timestamp: number }) {
   const date = new Date(props.timestamp * 1000);
   return (
-    <time dateTime={date.toISOString()} title={date.toLocaleString()}>
+    <time
+      className={props.className}
+      dateTime={date.toISOString()}
+      title={date.toLocaleString()}
+    >
       {timeago.format(date, 'en')}
     </time>
   );
@@ -148,7 +153,12 @@ export default class CodeReviewDetailPane extends Component<CodeReviewDetailPane
             <>
               <dt>Updated</dt>
               <dd>
-                <RelativeTime timestamp={codeReview.lastUpdatedTimestamp} />
+                <RelativeTime
+                  className={recentUpdateBadgeClassName(
+                    codeReview.lastUpdatedTimestamp,
+                  )}
+                  timestamp={codeReview.lastUpdatedTimestamp}
+                />
               </dd>
             </>
           )}

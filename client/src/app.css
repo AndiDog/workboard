@@ -424,6 +424,20 @@ tr.status-snoozed-until-update {
   color: #7a5200;
 }
 
+.recent-update-badge {
+  padding: 0 0.4em;
+  border-radius: 1em;
+  font-weight: 600;
+}
+.recent-update-badge-recent {
+  background-color: #fff1c2;
+  color: #7a5200;
+}
+.recent-update-badge-very-recent {
+  background-color: #fde4df;
+  color: #a8251a;
+}
+
 .code-review-layout {
   display: flex;
   align-items: flex-start;

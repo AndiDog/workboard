@@ -61,6 +61,8 @@ const gitHubPullRequestStatusToStringMap: {
     '<gitHubPullRequestStatusToStringMap logic error: unspecified enum value>',
 };
 
+const recentUpdateMaxAgeSeconds = 86400;
+
 export const snoozeDurations: Array<{ label: string; seconds: number }> = [
   { label: '1 hour', seconds: 3600 },
   { label: '1 day', seconds: 86400 },
@@ -92,6 +94,8 @@ const statusToTone: { [codeReviewStatus in CodeReviewStatus]: Tone } = {
   [CodeReviewStatus.CODE_REVIEW_STATUS_UNSPECIFIED]: 'danger',
   [CodeReviewStatus.CODE_REVIEW_STATUS_UPDATED_AFTER_SNOOZE]: 'success',
 };
+
+const veryRecentUpdateMaxAgeSeconds = 14400;
 
 export function canMarkReviewedDeleteOnMerge(codeReview: CodeReview): boolean {
   return (
@@ -211,11 +215,21 @@ export function CodeReviewInfoCells(props: {
             </>
           )}
           {authorName.length > 0 && ` · ${authorName}`}
-          {codeReview.lastUpdatedTimestamp > 0 &&
-            ` · updated ${timeago.format(
-              new Date(codeReview.lastUpdatedTimestamp * 1000),
-              'en',
-            )}`}
+          {codeReview.lastUpdatedTimestamp > 0 && (
+            <>
+              {' · '}
+              <span
+                className={recentUpdateBadgeClassName(
+                  codeReview.lastUpdatedTimestamp,
+                )}
+              >
+                {`updated ${timeago.format(
+                  new Date(codeReview.lastUpdatedTimestamp * 1000),
+                  'en',
+                )}`}
+              </span>
+            </>
+          )}
           {!statusesWithoutDescriptionInRow.has(codeReview.status) &&
             ` · ${codeReviewStatusDescription(codeReview)}`}
           {(codeReview.githubFields?.status ==
@@ -335,6 +349,20 @@ export function gitHubPullRequestStatusToString(
     return '<gitHubPullRequestStatusToString logic error: unhandled enum value>';
   }
   return value;
+}
+
+export function recentUpdateBadgeClassName(
+  lastUpdatedTimestamp: number,
+): string | undefined {
+  // Negative in case of clock drift, which counts as very recent
+  const ageSeconds = Date.now() / 1000 - lastUpdatedTimestamp;
+  if (ageSeconds < veryRecentUpdateMaxAgeSeconds) {
+    return 'recent-update-badge recent-update-badge-very-recent';
+  }
+  if (ageSeconds < recentUpdateMaxAgeSeconds) {
+    return 'recent-update-badge recent-update-badge-recent';
+  }
+  return undefined;
 }
 
 export function SignalBadge(props: { signal: Signal }) {
